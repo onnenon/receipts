@@ -2,6 +2,7 @@ defmodule Receipts.Workers.SweepAccounts do
   use Oban.Worker, queue: :default, max_attempts: 3
 
   require Ash.Query
+  require Logger
 
   @stale_minutes Application.compile_env(:receipts, :sync_stale_minutes, 30)
 
@@ -14,10 +15,18 @@ defmodule Receipts.Workers.SweepAccounts do
       |> Ash.Query.filter(is_nil(newest_synced_at) or newest_synced_at < ^stale_cutoff)
       |> Ash.read!()
 
-    for account <- accounts do
-      %{account_id: account.id}
-      |> Receipts.Workers.SyncAccount.new()
-      |> Oban.insert!()
+    if accounts == [] do
+      Logger.debug("[SweepAccounts] No stale accounts (threshold: #{@stale_minutes}m)")
+    else
+      Logger.info("[SweepAccounts] #{length(accounts)} stale account(s) found, enqueuing sync jobs")
+
+      for account <- accounts do
+        %{account_id: account.id}
+        |> Receipts.Workers.SyncAccount.new()
+        |> Oban.insert!()
+
+        Logger.info("[SweepAccounts] Enqueued sync for #{account.riot_game_name}##{account.riot_tag_line} (#{account.riot_region})")
+      end
     end
 
     :ok

@@ -80,6 +80,7 @@ defmodule Receipts.LoL.Account do
         :player_id
       ],
       update: [
+        :riot_puuid,
         :riot_game_name,
         :riot_tag_line,
         :newest_synced_at,

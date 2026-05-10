@@ -5,8 +5,12 @@ defmodule Receipts.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
+    log_api_key_status()
+
     children = [
       ReceiptsWeb.Telemetry,
       Receipts.Repo,
@@ -30,6 +34,27 @@ defmodule Receipts.Application do
   def config_change(changed, _new, removed) do
     ReceiptsWeb.Endpoint.config_change(changed, removed)
     :ok
+  end
+
+  defp log_api_key_status do
+    case System.get_env("RIOT_API_KEY") do
+      nil ->
+        Logger.error("[Config] RIOT_API_KEY is not set — syncs will fail")
+
+      key ->
+        trimmed = String.trim(key)
+
+        if trimmed != key do
+          Logger.warning("[Config] RIOT_API_KEY has leading/trailing whitespace — this will cause auth failures")
+        end
+
+        if String.starts_with?(trimmed, "RGAPI-") and byte_size(trimmed) == 42 do
+          prefix = String.slice(trimmed, 0, 11)
+          Logger.info("[Config] RIOT_API_KEY loaded: #{prefix}... (#{byte_size(trimmed)} bytes)")
+        else
+          Logger.error("[Config] RIOT_API_KEY looks malformed (expected 'RGAPI-' + 36 char UUID, got #{byte_size(trimmed)} bytes)")
+        end
+    end
   end
 
   defp skip_migrations?() do

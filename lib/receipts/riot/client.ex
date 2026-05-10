@@ -2,8 +2,8 @@ defmodule Receipts.Riot.Client do
   @moduledoc false
 
   defp api_key do
-    System.get_env("RIOT_API_KEY") ||
-      raise "RIOT_API_KEY not set in environment"
+    key = System.get_env("RIOT_API_KEY") || raise "RIOT_API_KEY not set in environment"
+    String.trim(key)
   end
 
   defp build_req(routing) do

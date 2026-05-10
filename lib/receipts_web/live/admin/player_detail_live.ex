@@ -3,7 +3,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
 
   require Ash.Query
 
-  alias Receipts.LoL.{Player, Account}
+  alias Receipts.LoL.{Player, Account, MatchParticipant}
   alias Receipts.Riot.Client
   alias Receipts.Workers.SyncAccount
 
@@ -38,6 +38,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
         {:ok,
          socket
          |> assign(:player, player)
+         |> assign(:total_games, count_total_games(player.accounts))
          |> assign(:show_add_account, false)
          |> assign(:add_account_form, new_add_account_form())
          |> assign(:adding_account, false)
@@ -83,12 +84,15 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                 |> SyncAccount.new()
                 |> Oban.insert!()
 
+                updated_accounts = [account | socket.assigns.player.accounts]
+
                 {:noreply,
                  socket
                  |> assign(
                    adding_account: false,
                    show_add_account: false,
-                   add_account_form: new_add_account_form()
+                   add_account_form: new_add_account_form(),
+                   total_games: count_total_games(updated_accounts)
                  )
                  |> stream_insert(:accounts, account, at: 0)
                  |> put_flash(:info, "#{game_name}##{tag_line} added. Sync started.")}
@@ -134,6 +138,16 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
     |> Oban.insert!()
 
     {:noreply, put_flash(socket, :info, "Sync job enqueued.")}
+  end
+
+  defp count_total_games([]), do: 0
+
+  defp count_total_games(accounts) do
+    account_ids = Enum.map(accounts, & &1.id)
+
+    MatchParticipant
+    |> Ash.Query.filter(account_id in ^account_ids)
+    |> Ash.count!()
   end
 
   defp parse_riot_id(riot_id) do
@@ -200,6 +214,10 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                 No Discord ID set
               <% end %>
             </p>
+            <div class="mt-2 flex items-center gap-1.5 text-sm">
+              <span class="font-semibold text-base-content">{@total_games}</span>
+              <span class="text-base-content/50">total games indexed</span>
+            </div>
           </div>
           <.link
             navigate={~p"/receipts?player_id=#{@player.id}"}
