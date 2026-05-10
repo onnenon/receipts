@@ -42,6 +42,14 @@ defmodule Receipts.Riot.Client do
     |> handle_response()
   end
 
+  # Returns league entries (rank) for a given PUUID.
+  # platform is the platform routing value: na1, euw1, kr, etc.
+  def get_rank_by_puuid(puuid, platform) do
+    build_req(platform)
+    |> Req.get(url: "/lol/league/v4/entries/by-puuid/#{puuid}")
+    |> handle_response()
+  end
+
   defp handle_response({:ok, %Req.Response{status: 200, body: body}}), do: {:ok, body}
   defp handle_response({:ok, %Req.Response{status: 429}}), do: {:error, :rate_limited}
   defp handle_response({:ok, %Req.Response{status: 404}}), do: {:error, :not_found}

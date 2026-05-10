@@ -73,6 +73,66 @@ defmodule Receipts.LoL.Queries do
     end)
   end
 
+  def top_champions_for_player(player_id, opts \\ []) do
+    queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+    from_year = Keyword.get(opts, :from_year)
+    to_year = Keyword.get(opts, :to_year)
+
+    account_ids =
+      Account
+      |> Ash.Query.filter(player_id == ^player_id)
+      |> Ash.read!()
+      |> Enum.map(& &1.id)
+
+    participants =
+      if account_ids == [] do
+        []
+      else
+        MatchParticipant
+        |> Ash.Query.filter(account_id in ^account_ids)
+        |> Ash.Query.load([:champion, :match])
+        |> Ash.read!()
+        |> Enum.filter(&match_included?(&1.match, queue_types, from_year, to_year))
+      end
+
+    avg = fn parts, field ->
+      n = length(parts)
+
+      if n > 0,
+        do: Float.round(Enum.sum(Enum.map(parts, &(Map.get(&1, field) || 0))) / n, 1),
+        else: 0.0
+    end
+
+    participants
+    |> Enum.group_by(& &1.champion_id)
+    |> Enum.map(fn {_champion_id, parts} ->
+      champion = hd(parts).champion
+      games_played = length(parts)
+      wins = Enum.count(parts, & &1.win)
+      win_rate = if games_played > 0, do: Float.round(wins / games_played * 100, 1), else: 0.0
+      avg_kills = avg.(parts, :kills)
+      avg_deaths = avg.(parts, :deaths)
+      avg_assists = avg.(parts, :assists)
+
+      kda_ratio =
+        if avg_deaths > 0,
+          do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
+          else: Float.round(avg_kills + avg_assists, 2)
+
+      %{
+        champion: champion,
+        games_played: games_played,
+        wins: wins,
+        win_rate: win_rate,
+        avg_kills: avg_kills,
+        avg_deaths: avg_deaths,
+        avg_assists: avg_assists,
+        kda_ratio: kda_ratio
+      }
+    end)
+    |> Enum.sort_by(fn %{games_played: g, champion: c} -> {-g, c.name} end)
+  end
+
   defp find_champion(name) do
     Ash.read!(Champion)
     |> Enum.find(fn c ->

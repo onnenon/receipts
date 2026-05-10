@@ -48,6 +48,13 @@ defmodule Receipts.RiotClientStub do
     callback.(match_id, routing)
   end
 
+  def get_rank_by_puuid(puuid, platform) do
+    case Map.get(state(__MODULE__), :rank_entries) do
+      nil -> {:ok, []}
+      callback -> callback.(puuid, platform)
+    end
+  end
+
   defp update_state(callback) do
     :persistent_term.put(__MODULE__, callback.(state(__MODULE__)))
   end

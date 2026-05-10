@@ -60,6 +60,11 @@ defmodule Receipts.LoL.Account do
       public?(true)
     end
 
+    # Solo/Duo rank (falls back to Flex if unranked in Solo). Nil = unranked.
+    attribute(:rank_tier, :string, public?: true)
+    attribute(:rank_division, :string, public?: true)
+    attribute(:rank_lp, :integer, public?: true)
+
     timestamps()
   end
 
@@ -102,7 +107,10 @@ defmodule Receipts.LoL.Account do
         :last_synced_at,
         :oldest_synced_start,
         :oldest_synced_at,
-        :history_fully_synced
+        :history_fully_synced,
+        :rank_tier,
+        :rank_division,
+        :rank_lp
       ]
     ])
   end

@@ -17,9 +17,9 @@ defmodule ReceiptsWeb.Router do
   scope "/", ReceiptsWeb do
     pipe_through(:browser)
 
-    get("/", PageController, :home)
-
     live_session :default do
+      live("/", PlayerSelectLive, :index)
+      live("/players/:id", PlayerLive, :show)
       live("/admin/players", Admin.PlayersLive, :index)
       live("/admin/players/:id", Admin.PlayerDetailLive, :show)
       live("/receipts", ReceiptsLive, :index)

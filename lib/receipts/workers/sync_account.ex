@@ -31,7 +31,8 @@ defmodule Receipts.Workers.SyncAccount do
         {:ok, account} ->
           case backward_pass(account, champion_map, tag) do
             :ok ->
-              mark_sync_complete(account)
+              account = mark_sync_complete(account)
+              fetch_rank(account, tag)
               Logger.info("[SyncAccount] Sync complete for #{tag}")
               :ok
 
@@ -49,6 +50,37 @@ defmodule Receipts.Workers.SyncAccount do
     account
     |> Ash.Changeset.for_update(:update, %{last_synced_at: DateTime.utc_now()})
     |> Ash.update!()
+  end
+
+  defp fetch_rank(account, tag) do
+    case @riot_client.get_rank_by_puuid(account.riot_puuid, account.riot_region) do
+      {:ok, entries} ->
+        entry =
+          Enum.find(entries, &(&1["queueType"] == "RANKED_SOLO_5x5")) ||
+            Enum.find(entries, &(&1["queueType"] == "RANKED_FLEX_SR"))
+
+        attrs =
+          if entry do
+            %{
+              rank_tier: entry["tier"],
+              rank_division: entry["rank"],
+              rank_lp: entry["leaguePoints"]
+            }
+          else
+            %{rank_tier: nil, rank_division: nil, rank_lp: nil}
+          end
+
+        account |> Ash.Changeset.for_update(:update, attrs) |> Ash.update!()
+
+        if entry,
+          do:
+            Logger.info(
+              "[SyncAccount] Rank updated: #{entry["tier"]} #{entry["rank"]} for #{tag}"
+            )
+
+      {:error, reason} ->
+        Logger.warning("[SyncAccount] Could not fetch rank for #{tag}: #{inspect(reason)}")
+    end
   end
 
   # --- Forward pass: fetch ALL matches newer than newest_synced_at ---

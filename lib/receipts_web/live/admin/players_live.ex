@@ -110,7 +110,7 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 <.link
-                  navigate={~p"/receipts?player_id=#{player.id}"}
+                  navigate={~p"/players/#{player.id}"}
                   class="rounded-md px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content border border-base-300 hover:bg-base-300 transition-colors"
                 >
                   Receipts

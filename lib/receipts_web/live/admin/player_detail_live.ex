@@ -3,6 +3,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
 
   require Ash.Query
 
+  alias AshPhoenix.Form, as: AshForm
   alias Receipts.LoL.{Player, Account, MatchParticipant}
   alias Receipts.Workers.SyncAccount
 
@@ -40,10 +41,52 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
          socket
          |> assign(:player, player)
          |> assign(:total_games, count_total_games(player.accounts))
+         |> assign(:show_edit, false)
+         |> assign(:edit_form, nil)
          |> assign(:show_add_account, false)
          |> assign(:add_account_form, new_add_account_form())
          |> assign(:adding_account, false)
          |> stream(:accounts, player.accounts)}
+    end
+  end
+
+  @impl true
+  def handle_event("start_edit", _, socket) do
+    form =
+      AshForm.for_update(socket.assigns.player, :update, as: "player", domain: Receipts.LoL)
+      |> to_form()
+
+    {:noreply, assign(socket, show_edit: true, edit_form: form)}
+  end
+
+  @impl true
+  def handle_event("cancel_edit", _, socket) do
+    {:noreply, assign(socket, show_edit: false, edit_form: nil)}
+  end
+
+  @impl true
+  def handle_event("validate_edit", %{"player" => params}, socket) do
+    form = socket.assigns.edit_form.source |> AshForm.validate(params) |> to_form()
+    {:noreply, assign(socket, :edit_form, form)}
+  end
+
+  @impl true
+  def handle_event("save_edit", %{"player" => params}, socket) do
+    case AshForm.submit(socket.assigns.edit_form.source, params: params) do
+      {:ok, updated_player} ->
+        player = %{
+          socket.assigns.player
+          | name: updated_player.name,
+            discord_id: updated_player.discord_id
+        }
+
+        {:noreply,
+         socket
+         |> assign(player: player, show_edit: false, edit_form: nil)
+         |> put_flash(:info, "Player updated.")}
+
+      {:error, form} ->
+        {:noreply, assign(socket, :edit_form, to_form(form))}
     end
   end
 
@@ -211,35 +254,76 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
         </div>
 
         <%!-- Player header --%>
-        <div class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-200 p-5 shadow-sm sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Player profile</p>
-            <h1 class="mt-1 text-3xl font-bold tracking-tight">{@player.name}</h1>
-            <p class="mt-1 text-sm text-base-content/50">
-              <%= if @player.discord_id do %>
-                Discord: {@player.discord_id}
-              <% else %>
-                No Discord ID set
-              <% end %>
-            </p>
-            <div class="mt-2 flex items-center gap-1.5 text-sm">
-              <span class="font-semibold text-base-content">{@total_games}</span>
-              <span class="text-base-content/50">total games indexed</span>
-              <%= if @player.oldest_game_date do %>
-                <span class="text-base-content/30">·</span>
-                <span class="text-base-content/50">
-                  {format_date(@player.oldest_game_date)} – {format_date(@player.newest_game_date)}
-                </span>
-              <% end %>
+        <div class="rounded-xl border border-base-300 bg-base-200 p-5 shadow-sm">
+          <%= if @show_edit do %>
+            <p class="mb-4 text-xs font-semibold uppercase tracking-wide text-primary">Edit Player</p>
+            <.form
+              for={@edit_form}
+              id="edit-player-form"
+              phx-change="validate_edit"
+              phx-submit="save_edit"
+            >
+              <div class="space-y-3">
+                <.input field={@edit_form[:name]} type="text" label="Name" required />
+                <.input field={@edit_form[:discord_id]} type="text" label="Discord ID" placeholder="optional" />
+              </div>
+              <div class="mt-4 flex gap-2">
+                <button
+                  type="submit"
+                  class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content hover:opacity-90 transition-opacity phx-submit-loading:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  phx-click="cancel_edit"
+                  class="rounded-lg border border-base-300 px-4 py-2 text-sm font-medium hover:bg-base-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </.form>
+          <% else %>
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-primary">Player profile</p>
+                <h1 class="mt-1 text-3xl font-bold tracking-tight">{@player.name}</h1>
+                <p class="mt-1 text-sm text-base-content/50">
+                  <%= if @player.discord_id do %>
+                    Discord: {@player.discord_id}
+                  <% else %>
+                    No Discord ID set
+                  <% end %>
+                </p>
+                <div class="mt-2 flex items-center gap-1.5 text-sm">
+                  <span class="font-semibold text-base-content">{@total_games}</span>
+                  <span class="text-base-content/50">total games indexed</span>
+                  <%= if @player.oldest_game_date do %>
+                    <span class="text-base-content/30">·</span>
+                    <span class="text-base-content/50">
+                      {format_date(@player.oldest_game_date)} – {format_date(@player.newest_game_date)}
+                    </span>
+                  <% end %>
+                </div>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <button
+                  id="edit-player-btn"
+                  phx-click="start_edit"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium transition hover:bg-base-300/60"
+                >
+                  <.icon name="hero-pencil-mini" class="h-4 w-4" /> Edit
+                </button>
+                <.link
+                  navigate={~p"/players/#{@player.id}"}
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium transition hover:bg-base-300/60"
+                >
+                  View Receipts
+                  <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
+                </.link>
+              </div>
             </div>
-          </div>
-          <.link
-            navigate={~p"/receipts?player_id=#{@player.id}"}
-            class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium transition hover:bg-base-300/60"
-          >
-            View Receipts
-            <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-          </.link>
+          <% end %>
         </div>
 
         <%!-- Accounts --%>
