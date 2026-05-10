@@ -14,7 +14,14 @@ config :receipts,
 
 config :receipts, Oban,
   repo: Receipts.Repo,
-  plugins: [Oban.Plugins.Pruner],
+  plugins: [
+    Oban.Plugins.Pruner,
+    {Oban.Plugins.Cron,
+     crontab: [
+       # Daily at 4am UTC — champion data changes roughly every two weeks
+       {"0 4 * * *", Receipts.Workers.SyncDataDragon}
+     ]}
+  ],
   queues: [default: 10, sync: 5, data_dragon: 2]
 
 # Configure the endpoint

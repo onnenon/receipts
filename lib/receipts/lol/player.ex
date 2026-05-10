@@ -4,34 +4,34 @@ defmodule Receipts.LoL.Player do
     data_layer: AshPostgres.DataLayer
 
   postgres do
-    table "lol_players"
-    repo Receipts.Repo
+    table("lol_players")
+    repo(Receipts.Repo)
   end
 
   attributes do
-    uuid_primary_key :id
+    uuid_primary_key(:id)
 
     attribute :name, :string do
-      allow_nil? false
-      public? true
+      allow_nil?(false)
+      public?(true)
     end
 
     attribute :discord_id, :string do
-      public? true
+      public?(true)
     end
 
     timestamps()
   end
 
   identities do
-    identity :unique_discord_id, [:discord_id], nils_distinct?: false
+    identity(:unique_discord_id, [:discord_id], nils_distinct?: false)
   end
 
   relationships do
-    has_many :accounts, Receipts.LoL.Account
+    has_many(:accounts, Receipts.LoL.Account)
   end
 
   actions do
-    defaults [:read, :destroy, create: [:name, :discord_id], update: [:name, :discord_id]]
+    defaults([:read, :destroy, create: [:name, :discord_id], update: [:name, :discord_id]])
   end
 end
