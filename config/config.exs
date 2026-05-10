@@ -10,7 +10,9 @@ import Config
 config :receipts,
   ecto_repos: [Receipts.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: [Receipts.LoL]
+  ash_domains: [Receipts.LoL],
+  # How old (in minutes) an account's newest_synced_at must be before SweepAccounts re-enqueues it.
+  sync_stale_minutes: 30
 
 config :receipts, Oban,
   repo: Receipts.Repo,
@@ -20,7 +22,7 @@ config :receipts, Oban,
      crontab: [
        # Daily at 4am UTC — champion data changes roughly every two weeks
        {"0 4 * * *", Receipts.Workers.SyncDataDragon},
-       # Hourly — enqueue SyncAccount for any account not synced in the last 30 minutes
+       # Hourly sweep — override in dev.exs for faster local syncing
        {"0 * * * *", Receipts.Workers.SweepAccounts}
      ]}
   ],

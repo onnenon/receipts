@@ -24,7 +24,7 @@ defmodule Receipts.LoL.Player do
   end
 
   identities do
-    identity(:unique_discord_id, [:discord_id], nils_distinct?: false)
+    identity(:unique_discord_id, [:discord_id])
   end
 
   relationships do

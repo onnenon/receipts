@@ -142,6 +142,7 @@ defmodule Receipts.Workers.SyncAccount do
 
   defp upsert_match_and_participant(match_id, info, participant, account, champion_map) do
     game_datetime = DateTime.from_unix!(info["gameStartTimestamp"], :millisecond)
+    queue_id = info["queueId"]
 
     match =
       Receipts.LoL.Match
@@ -149,7 +150,8 @@ defmodule Receipts.Workers.SyncAccount do
         riot_match_id: match_id,
         game_datetime: game_datetime,
         game_duration_seconds: info["gameDuration"],
-        queue_id: info["queueId"],
+        queue_id: queue_id,
+        queue_type: Receipts.LoL.Queue.from_id(queue_id),
         raw_info: info
       })
       |> Ash.create!()

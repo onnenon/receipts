@@ -8,8 +8,8 @@ defmodule Receipts.LoL.Match do
     repo(Receipts.Repo)
 
     custom_indexes do
-      # Recent games sorting and time-range queries
       index([:game_datetime])
+      index([:queue_type])
     end
   end
 
@@ -34,6 +34,10 @@ defmodule Receipts.LoL.Match do
       public?(true)
     end
 
+    attribute :queue_type, :string do
+      public?(true)
+    end
+
     # Full match info blob from Riot API for ad-hoc access and AI context
     attribute :raw_info, :map do
       public?(true)
@@ -54,16 +58,30 @@ defmodule Receipts.LoL.Match do
     defaults([
       :read,
       :destroy,
-      create: [:riot_match_id, :game_datetime, :game_duration_seconds, :queue_id, :raw_info],
+      create: [
+        :riot_match_id,
+        :game_datetime,
+        :game_duration_seconds,
+        :queue_id,
+        :queue_type,
+        :raw_info
+      ],
       update: []
     ])
 
     create :sync do
-      accept([:riot_match_id, :game_datetime, :game_duration_seconds, :queue_id, :raw_info])
+      accept([
+        :riot_match_id,
+        :game_datetime,
+        :game_duration_seconds,
+        :queue_id,
+        :queue_type,
+        :raw_info
+      ])
+
       upsert?(true)
       upsert_identity(:unique_match_id)
-      # Update queue/raw on conflict so RETURNING * gives back the existing row's id
-      upsert_fields([:queue_id, :raw_info])
+      upsert_fields([:queue_id, :queue_type, :raw_info])
     end
   end
 end

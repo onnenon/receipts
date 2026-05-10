@@ -3,7 +3,7 @@ defmodule Receipts.Workers.SweepAccounts do
 
   require Ash.Query
 
-  @stale_minutes 30
+  @stale_minutes Application.compile_env(:receipts, :sync_stale_minutes, 30)
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do

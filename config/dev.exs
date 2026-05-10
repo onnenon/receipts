@@ -90,3 +90,19 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# Faster sync in local dev: accounts are considered stale after 1 minute,
+# and the sweep job runs every minute instead of hourly.
+config :receipts, sync_stale_minutes: 1
+
+config :receipts, Oban,
+  repo: Receipts.Repo,
+  plugins: [
+    Oban.Plugins.Pruner,
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 4 * * *", Receipts.Workers.SyncDataDragon},
+       {"* * * * *", Receipts.Workers.SweepAccounts}
+     ]}
+  ],
+  queues: [default: 10, sync: 5, data_dragon: 2]
