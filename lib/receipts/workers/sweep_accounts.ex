@@ -18,14 +18,18 @@ defmodule Receipts.Workers.SweepAccounts do
     if accounts == [] do
       Logger.debug("[SweepAccounts] No stale accounts (threshold: #{@stale_minutes}m)")
     else
-      Logger.info("[SweepAccounts] #{length(accounts)} stale account(s) found, enqueuing sync jobs")
+      Logger.info(
+        "[SweepAccounts] #{length(accounts)} stale account(s) found, enqueuing sync jobs"
+      )
 
       for account <- accounts do
         %{account_id: account.id}
         |> Receipts.Workers.SyncAccount.new()
         |> Oban.insert!()
 
-        Logger.info("[SweepAccounts] Enqueued sync for #{account.riot_game_name}##{account.riot_tag_line} (#{account.riot_region})")
+        Logger.info(
+          "[SweepAccounts] Enqueued sync for #{account.riot_game_name}##{account.riot_tag_line} (#{account.riot_region})"
+        )
       end
     end
 

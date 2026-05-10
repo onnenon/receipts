@@ -45,14 +45,18 @@ defmodule Receipts.Application do
         trimmed = String.trim(key)
 
         if trimmed != key do
-          Logger.warning("[Config] RIOT_API_KEY has leading/trailing whitespace — this will cause auth failures")
+          Logger.warning(
+            "[Config] RIOT_API_KEY has leading/trailing whitespace — this will cause auth failures"
+          )
         end
 
         if String.starts_with?(trimmed, "RGAPI-") and byte_size(trimmed) == 42 do
           prefix = String.slice(trimmed, 0, 11)
           Logger.info("[Config] RIOT_API_KEY loaded: #{prefix}... (#{byte_size(trimmed)} bytes)")
         else
-          Logger.error("[Config] RIOT_API_KEY looks malformed (expected 'RGAPI-' + 36 char UUID, got #{byte_size(trimmed)} bytes)")
+          Logger.error(
+            "[Config] RIOT_API_KEY looks malformed (expected 'RGAPI-' + 36 char UUID, got #{byte_size(trimmed)} bytes)"
+          )
         end
     end
   end

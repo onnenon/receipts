@@ -1,12 +1,12 @@
 defmodule Receipts.Workers.SyncAccount do
   use Oban.Worker, queue: :sync, max_attempts: 3
 
-  require Ash.Query
   require Logger
 
   # One backward page per job run; forward pass grabs up to 100 new matches.
   @backward_page_size 50
   @forward_page_size 100
+  @riot_client Application.compile_env(:receipts, :riot_client, Receipts.Riot.Client)
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"account_id" => account_id}}) do
@@ -16,64 +16,133 @@ defmodule Receipts.Workers.SyncAccount do
 
     Logger.info("[SyncAccount] Starting sync for #{tag}")
 
-    with :ok <- forward_pass(account, champion_map, tag),
-         :ok <- backward_pass(account, champion_map, tag) do
-      Logger.info("[SyncAccount] Sync complete for #{tag}")
-      :ok
+    # Forward pass handles new matches; backward pass handles historical backfill.
+    # We run forward first to ensure newest_synced_at is up to date.
+    case forward_pass(account, champion_map, tag) do
+      {:ok, account} ->
+        case backward_pass(account, champion_map, tag) do
+          :ok ->
+            Logger.info("[SyncAccount] Sync complete for #{tag}")
+            :ok
+
+          error ->
+            error
+        end
+
+      error ->
+        error
     end
   end
 
-  # --- Forward pass: fetch matches newer than newest_synced_at ---
+  # --- Forward pass: fetch ALL matches newer than newest_synced_at ---
 
   defp forward_pass(account, champion_map, tag) do
-    params = forward_params(account)
+    # startTime is inclusive in Riot API.
+    # To avoid re-fetching the same "newest" match, we could use +1s, 
+    # but Riot IDs are unique and we upsert, so it is safer to just fetch.
+    start_time =
+      if account.newest_synced_at,
+        do: DateTime.to_unix(account.newest_synced_at, :second),
+        else: nil
 
-    case Receipts.Riot.Client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
+    case fetch_and_process_forward(account, champion_map, tag, start_time, nil, nil) do
+      {:ok, newest_match_at} ->
+        # Only advance to an observed match timestamp. If there were no matches, preserve an
+        # existing checkpoint so a transiently delayed Riot result cannot be skipped.
+        new_ts = newest_match_at || account.newest_synced_at || DateTime.utc_now()
+
+        account =
+          account
+          |> Ash.Changeset.for_update(:update, %{newest_synced_at: new_ts})
+          |> Ash.update!()
+
+        {:ok, account}
+
+      error ->
+        error
+    end
+  end
+
+  # Recursive helper to handle more than 100 new matches.
+  defp fetch_and_process_forward(account, champion_map, tag, start_time, end_time, newest_so_far) do
+    params = [count: @forward_page_size]
+    params = if start_time, do: params ++ [startTime: start_time], else: params
+    params = if end_time, do: params ++ [endTime: end_time], else: params
+
+    case @riot_client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
       {:ok, []} ->
-        account
-        |> Ash.Changeset.for_update(:update, %{newest_synced_at: DateTime.utc_now()})
-        |> Ash.update!()
-
-        Logger.info("[SyncAccount] Forward pass: no new matches for #{tag}, timestamp updated")
-        :ok
+        {:ok, newest_so_far}
 
       {:ok, match_ids} ->
-        Logger.info("[SyncAccount] Forward pass: #{length(match_ids)} new match(es) for #{tag}")
+        Logger.info(
+          "[SyncAccount] Forward pass: processing #{length(match_ids)} match(es) for #{tag}"
+        )
 
         case process_match_ids(match_ids, account, champion_map, tag) do
           :ok ->
-            account
-            |> Ash.Changeset.for_update(:update, %{newest_synced_at: DateTime.utc_now()})
-            |> Ash.update!()
+            with {:ok, newest_so_far} <-
+                   update_newest_so_far(newest_so_far, match_ids, account.riot_routing) do
+              if start_time && length(match_ids) == @forward_page_size do
+                # Possible more matches between our checkpoint and the oldest in this batch.
+                # We fetch the timestamp of the oldest match in this batch to use as endTime for next.
+                case get_match_timestamp(List.last(match_ids), account.riot_routing) do
+                  {:ok, oldest_ts} ->
+                    fetch_and_process_forward(
+                      account,
+                      champion_map,
+                      tag,
+                      start_time,
+                      DateTime.to_unix(oldest_ts, :second) - 1,
+                      newest_so_far
+                    )
 
-            Logger.info(
-              "[SyncAccount] Forward pass complete, newest_synced_at updated for #{tag}"
-            )
-
-            :ok
-
-          {:snooze, _} = snooze ->
-            snooze
+                  {:error, _} = error ->
+                    error
+                end
+              else
+                {:ok, newest_so_far}
+              end
+            end
 
           error ->
             error
         end
 
       {:error, :rate_limited} ->
-        Logger.warning("[SyncAccount] Forward pass rate limited for #{tag}, snoozing 65s")
         {:snooze, 65}
 
       {:error, reason} ->
-        Logger.error("[SyncAccount] Forward pass failed for #{tag}: #{inspect(reason)}")
         {:error, {:forward_pass, reason}}
     end
   end
 
-  defp forward_params(%{newest_synced_at: nil}),
-    do: [count: @forward_page_size]
+  defp get_newest_match_timestamp(match_ids, routing) do
+    # Riot returns newest first, so first ID is newest.
+    match_ids
+    |> List.first()
+    |> get_match_timestamp(routing)
+  end
 
-  defp forward_params(%{newest_synced_at: ts}),
-    do: [count: @forward_page_size, startTime: DateTime.to_unix(ts, :second)]
+  defp update_newest_so_far(nil, match_ids, routing),
+    do: get_newest_match_timestamp(match_ids, routing)
+
+  defp update_newest_so_far(newest_so_far, _match_ids, _routing), do: {:ok, newest_so_far}
+
+  defp get_match_timestamp(match_id, routing) do
+    case Receipts.Repo.get_by(Receipts.LoL.Match, riot_match_id: match_id) do
+      %{game_datetime: game_datetime} ->
+        {:ok, game_datetime}
+
+      nil ->
+        case @riot_client.get_match(match_id, routing) do
+          {:ok, data} ->
+            {:ok, DateTime.from_unix!(data["info"]["gameStartTimestamp"], :millisecond)}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
 
   # --- Backward pass: one page of history per job run ---
 
@@ -83,20 +152,13 @@ defmodule Receipts.Workers.SyncAccount do
   end
 
   defp backward_pass(account, champion_map, tag) do
-    account = Ash.load!(account, [:oldest_game_datetime])
+    # Using offset (start) is reliable for backfill IF forward_pass has fetched everything 
+    # between now() and our history tip.
+    params = [start: account.oldest_synced_start, count: @backward_page_size]
 
-    params =
-      if account.oldest_game_datetime do
-        [endTime: DateTime.to_unix(account.oldest_game_datetime, :second) - 1, count: @backward_page_size]
-      else
-        [start: 0, count: @backward_page_size]
-      end
+    Logger.info("[SyncAccount] Backward pass: offset #{account.oldest_synced_start} for #{tag}")
 
-    Logger.info(
-      "[SyncAccount] Backward pass: fetching before #{account.oldest_game_datetime || "beginning"} for #{tag}"
-    )
-
-    case Receipts.Riot.Client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
+    case @riot_client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
       {:ok, []} ->
         account
         |> Ash.Changeset.for_update(:update, %{history_fully_synced: true})
@@ -112,19 +174,18 @@ defmodule Receipts.Workers.SyncAccount do
 
         case process_match_ids(match_ids, account, champion_map, tag) do
           :ok ->
-            # Update the count for the UI; the next run will use account.oldest_game_datetime
-            new_count = count_indexed_games(account)
+            # Increment offset by exactly how many IDs we were given, even if we skipped them.
+            # This ensures we always move backward and never get stuck.
+            new_offset = account.oldest_synced_start + length(match_ids)
 
             account
             |> Ash.Changeset.for_update(:update, %{
-              oldest_synced_start: new_count,
+              oldest_synced_start: new_offset,
               history_fully_synced: false
             })
             |> Ash.update!()
 
-            Logger.info(
-              "[SyncAccount] Backward pass done: #{new_count} total games indexed for #{tag}"
-            )
+            Logger.info("[SyncAccount] Backward pass done: new offset #{new_offset} for #{tag}")
 
             :ok
 
@@ -145,12 +206,6 @@ defmodule Receipts.Workers.SyncAccount do
     end
   end
 
-  defp count_indexed_games(account) do
-    Receipts.LoL.MatchParticipant
-    |> Ash.Query.filter(account_id == ^account.id)
-    |> Ash.count!()
-  end
-
   # --- Match processing ---
 
   defp process_match_ids(match_ids, account, champion_map, tag) do
@@ -168,13 +223,70 @@ defmodule Receipts.Workers.SyncAccount do
   end
 
   defp process_match(match_id, account, champion_map, tag) do
-    case Receipts.Riot.Client.get_match(match_id, account.riot_routing) do
+    # Optimization: check if we already have this match in the DB before calling Riot API.
+    # Note: This means if match data changes on Riot side, we won't see it, 
+    # but for LoL matches, the info is immutable after the game ends.
+    case Receipts.Repo.get_by(Receipts.LoL.Match, riot_match_id: match_id) do
+      nil ->
+        case @riot_client.get_match(match_id, account.riot_routing) do
+          {:ok, match_data} ->
+            info = match_data["info"]
+
+            case find_participant(info["participants"], account.riot_puuid) do
+              nil ->
+                Logger.debug("[SyncAccount] #{match_id}: #{tag} not a participant, skipping")
+                :ok
+
+              participant ->
+                upsert_match_and_participant(match_id, info, participant, account, champion_map)
+            end
+
+          {:error, :not_found} ->
+            Logger.warning("[SyncAccount] #{match_id} not found in Riot API, skipping")
+            :ok
+
+          {:error, :rate_limited} ->
+            Logger.warning(
+              "[SyncAccount] Rate limited fetching #{match_id} for #{tag}, snoozing 65s"
+            )
+
+            {:snooze, 65}
+
+          {:error, reason} ->
+            Logger.error(
+              "[SyncAccount] Failed to fetch #{match_id} for #{tag}: #{inspect(reason)}"
+            )
+
+            {:error, {match_id, reason}}
+        end
+
+      match ->
+        # We already have the match. We should still ensure the participant is recorded for THIS account.
+        # Let's check for the participant specifically.
+        case Receipts.Repo.get_by(Receipts.LoL.MatchParticipant,
+               account_id: account.id,
+               match_id: match.id
+             ) do
+          nil ->
+            # We have the match but not the participant for this account.
+            # This happens if multiple tracked accounts were in the same match.
+            # We need to fetch the match data once to get this participant's info.
+            fetch_and_upsert_match(match_id, account, champion_map, tag)
+
+          _participant ->
+            Logger.debug("[SyncAccount] Already have #{match_id} for #{tag}, skipping")
+            :ok
+        end
+    end
+  end
+
+  defp fetch_and_upsert_match(match_id, account, champion_map, _tag) do
+    case @riot_client.get_match(match_id, account.riot_routing) do
       {:ok, match_data} ->
         info = match_data["info"]
 
         case find_participant(info["participants"], account.riot_puuid) do
           nil ->
-            Logger.debug("[SyncAccount] #{match_id}: #{tag} not a participant, skipping")
             :ok
 
           participant ->
@@ -186,11 +298,14 @@ defmodule Receipts.Workers.SyncAccount do
         :ok
 
       {:error, :rate_limited} ->
-        Logger.warning("[SyncAccount] Rate limited fetching #{match_id} for #{tag}, snoozing 65s")
+        Logger.warning(
+          "[SyncAccount] Rate limited fetching #{match_id} for #{account.riot_game_name}, snoozing 65s"
+        )
+
         {:snooze, 65}
 
       {:error, reason} ->
-        Logger.error("[SyncAccount] Failed to fetch #{match_id} for #{tag}: #{inspect(reason)}")
+        Logger.error("[SyncAccount] Failed to fetch #{match_id}: #{inspect(reason)}")
         {:error, {match_id, reason}}
     end
   end

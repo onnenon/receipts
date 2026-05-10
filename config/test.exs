@@ -28,6 +28,8 @@ config :swoosh, :api_client, false
 
 config :receipts, Oban, testing: :inline
 
+config :receipts, :riot_client, Receipts.RiotClientStub
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

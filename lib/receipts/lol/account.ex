@@ -69,7 +69,7 @@ defmodule Receipts.LoL.Account do
 
   aggregates do
     first :oldest_game_datetime, [:match_participants, :match], :game_datetime do
-      sort game_datetime: :asc
+      sort(game_datetime: :asc)
     end
   end
 

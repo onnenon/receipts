@@ -33,11 +33,11 @@ defmodule Receipts.LoL.Player do
 
   aggregates do
     first :oldest_game_date, [:accounts, :match_participants, :match], :game_datetime do
-      sort game_datetime: :asc
+      sort(game_datetime: :asc)
     end
 
     first :newest_game_date, [:accounts, :match_participants, :match], :game_datetime do
-      sort game_datetime: :desc
+      sort(game_datetime: :desc)
     end
   end
 
