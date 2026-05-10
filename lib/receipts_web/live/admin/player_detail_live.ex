@@ -312,7 +312,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                     · History:
                     {if account.history_fully_synced,
                       do: "complete ✓",
-                      else: "#{account.oldest_synced_start} games indexed"}
+                      else: "#{account.oldest_synced_start} matches scanned"}
                   </p>
                 </div>
                 <button

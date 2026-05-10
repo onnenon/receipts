@@ -87,6 +87,25 @@ defmodule Receipts.Workers.SyncAccountTest do
     refute Keyword.has_key?(opts, :endTime)
   end
 
+  test "does not advance sync cursors when champion data is missing", %{
+    account: account,
+    champion: champion
+  } do
+    champion |> Ash.destroy!()
+
+    RiotClientStub.put_match_ids(fn _puuid, _routing, _opts -> {:ok, ["NA1_1"]} end)
+
+    assert {:error, :champions_not_synced} =
+             SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    account = Ash.get!(Account, account.id)
+    assert is_nil(account.newest_synced_at)
+    assert is_nil(account.oldest_synced_at)
+    assert account.oldest_synced_start == 0
+    refute account.history_fully_synced
+    assert RiotClientStub.match_id_calls() == []
+  end
+
   test "missing participant fetch errors do not advance the backward cursor", %{account: account} do
     checkpoint = ~U[2026-05-10 12:00:00Z]
     account = update_account!(account, %{newest_synced_at: checkpoint, oldest_synced_start: 0})

@@ -15,23 +15,32 @@ defmodule Receipts.Workers.SyncAccount do
     champion_map = load_champion_map()
 
     Logger.info("[SyncAccount] Starting sync for #{tag}")
-    backfill_stored_matches(account, champion_map, tag)
 
-    # Forward pass handles new matches; backward pass handles historical backfill.
-    # We run forward first to ensure newest_synced_at is up to date.
-    case forward_pass(account, champion_map, tag) do
-      {:ok, account} ->
-        case backward_pass(account, champion_map, tag) do
-          :ok ->
-            Logger.info("[SyncAccount] Sync complete for #{tag}")
-            :ok
+    if champion_map == %{} do
+      Logger.error(
+        "[SyncAccount] Champion data is missing; run Data Dragon sync before account sync"
+      )
 
-          error ->
-            error
-        end
+      {:error, :champions_not_synced}
+    else
+      backfill_stored_matches(account, champion_map, tag)
 
-      error ->
-        error
+      # Forward pass handles new matches; backward pass handles historical backfill.
+      # We run forward first to ensure newest_synced_at is up to date.
+      case forward_pass(account, champion_map, tag) do
+        {:ok, account} ->
+          case backward_pass(account, champion_map, tag) do
+            :ok ->
+              Logger.info("[SyncAccount] Sync complete for #{tag}")
+              :ok
+
+            error ->
+              error
+          end
+
+        error ->
+          error
+      end
     end
   end
 
