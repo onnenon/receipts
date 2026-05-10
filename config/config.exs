@@ -12,7 +12,8 @@ config :receipts,
   generators: [timestamp_type: :utc_datetime],
   ash_domains: [Receipts.LoL],
   # How old (in minutes) an account's newest_synced_at must be before SweepAccounts re-enqueues it.
-  sync_stale_minutes: 30
+  sync_stale_minutes: 30,
+  refresh_account_identities_on_startup: true
 
 config :receipts, Oban,
   repo: Receipts.Repo,

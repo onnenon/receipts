@@ -121,6 +121,66 @@ defmodule Receipts.Workers.SyncAccountTest do
     assert participant_count(account) == 0
   end
 
+  test "empty backward result before a history cursor does not mark history fully synced", %{
+    account: account
+  } do
+    checkpoint = ~U[2026-05-10 12:00:00Z]
+    account = update_account!(account, %{newest_synced_at: checkpoint})
+
+    RiotClientStub.put_match_ids(fn _puuid, _routing, _opts -> {:ok, []} end)
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    account = Ash.get!(Account, account.id)
+    refute account.history_fully_synced
+    assert is_nil(account.oldest_synced_at)
+    assert account.oldest_synced_start == 0
+  end
+
+  test "empty backward result after a history cursor marks history fully synced", %{
+    account: account
+  } do
+    newest_synced_at = ~U[2026-05-10 12:00:00Z]
+    oldest_synced_at = ~U[2026-05-09 12:00:00Z]
+
+    account =
+      update_account!(account, %{
+        newest_synced_at: newest_synced_at,
+        oldest_synced_start: 50,
+        oldest_synced_at: oldest_synced_at,
+        history_fully_synced: false
+      })
+
+    RiotClientStub.put_match_ids(fn _puuid, _routing, _opts -> {:ok, []} end)
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    account = Ash.get!(Account, account.id)
+    assert account.history_fully_synced
+    assert DateTime.compare(account.oldest_synced_at, oldest_synced_at) == :eq
+    assert account.oldest_synced_start == 50
+  end
+
+  test "match id rate limiting does not mark history fully synced", %{account: account} do
+    checkpoint = ~U[2026-05-10 12:00:00Z]
+    account = update_account!(account, %{newest_synced_at: checkpoint})
+
+    RiotClientStub.put_match_ids(fn _puuid, _routing, opts ->
+      if Keyword.has_key?(opts, :startTime) do
+        {:ok, []}
+      else
+        {:error, :rate_limited}
+      end
+    end)
+
+    assert {:snooze, 65} = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    account = Ash.get!(Account, account.id)
+    refute account.history_fully_synced
+    assert is_nil(account.oldest_synced_at)
+    assert account.oldest_synced_start == 0
+  end
+
   test "backward pass continues from the oldest synced timestamp instead of an offset", %{
     account: account,
     champion: champion

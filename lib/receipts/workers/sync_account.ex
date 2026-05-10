@@ -159,12 +159,19 @@ defmodule Receipts.Workers.SyncAccount do
     )
 
     case @riot_client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
-      {:ok, []} ->
+      {:ok, []} when not is_nil(account.oldest_synced_at) ->
         account
         |> Ash.Changeset.for_update(:update, %{history_fully_synced: true})
         |> Ash.update!()
 
         Logger.info("[SyncAccount] Backward pass complete: history fully synced for #{tag}")
+        :ok
+
+      {:ok, []} ->
+        Logger.warning(
+          "[SyncAccount] Backward pass returned no matches before a history cursor exists for #{tag}; preserving incomplete history"
+        )
+
         :ok
 
       {:ok, match_ids} ->
