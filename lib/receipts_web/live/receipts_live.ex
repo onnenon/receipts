@@ -37,20 +37,31 @@ defmodule ReceiptsWeb.ReceiptsLive do
   @impl true
   def handle_event(
         "search",
-        %{"receipts" => %{"player_id" => player_id, "champion_key" => champion_key}},
+        %{"receipts" => %{"player_id" => player_id, "champion" => champion_query}},
         socket
       )
-      when player_id != "" and champion_key != "" do
-    socket =
-      socket
-      |> assign(:search_player_id, player_id)
-      |> assign(:search_champion_key, champion_key)
+      when player_id != "" and champion_query != "" do
+    case find_champion(socket.assigns.champions, champion_query) do
+      nil ->
+        {:noreply,
+         socket
+         |> assign(:search_form, build_search_form(player_id, champion_query))
+         |> assign(:result, nil)
+         |> put_flash(:error, "Champion not found. Try a champion name like Ahri or Aatrox.")}
 
-    {:noreply, run_query(socket)}
+      champion ->
+        socket =
+          socket
+          |> assign(:search_player_id, player_id)
+          |> assign(:search_champion_key, champion.key)
+          |> assign(:search_form, build_search_form(player_id, champion.name))
+
+        {:noreply, run_query(socket)}
+    end
   end
 
   def handle_event("search", _, socket) do
-    {:noreply, put_flash(socket, :error, "Select a player and champion.")}
+    {:noreply, put_flash(socket, :error, "Select a player and type a champion.")}
   end
 
   @impl true
@@ -61,6 +72,23 @@ defmodule ReceiptsWeb.ReceiptsLive do
         else: MapSet.put(socket.assigns.enabled_queues, queue)
 
     socket = assign(socket, :enabled_queues, enabled)
+    {:noreply, maybe_rerun(socket)}
+  end
+
+  @impl true
+  def handle_event("select_all_queues", _, socket) do
+    enabled =
+      Queue.ui_queues()
+      |> Enum.map(fn {queue_type, _label, _default} -> queue_type end)
+      |> MapSet.new()
+
+    socket = assign(socket, :enabled_queues, enabled)
+    {:noreply, maybe_rerun(socket)}
+  end
+
+  @impl true
+  def handle_event("clear_queues", _, socket) do
+    socket = assign(socket, :enabled_queues, MapSet.new())
     {:noreply, maybe_rerun(socket)}
   end
 
@@ -105,10 +133,26 @@ defmodule ReceiptsWeb.ReceiptsLive do
     end
   end
 
-  defp build_search_form(player_id, champion_key) do
-    to_form(%{"player_id" => player_id || "", "champion_key" => champion_key || ""},
+  defp build_search_form(player_id, champion_query) do
+    to_form(%{"player_id" => player_id || "", "champion" => champion_query || ""},
       as: "receipts"
     )
+  end
+
+  defp find_champion(champions, query) do
+    normalized_query = normalize_champion(query)
+
+    Enum.find(champions, fn champion ->
+      normalize_champion(champion.name) == normalized_query ||
+        normalize_champion(champion.key) == normalized_query
+    end)
+  end
+
+  defp normalize_champion(value) do
+    value
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]/, "")
   end
 
   defp champion_icon_url(champion) do
@@ -142,14 +186,22 @@ defmodule ReceiptsWeb.ReceiptsLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
-        <div>
-          <h1 class="text-2xl font-bold tracking-tight">Check Receipts</h1>
-          <p class="mt-1 text-sm text-base-content/50">See the stats. Show the receipts.</p>
+        <div class="flex flex-col gap-2">
+          <p class="text-xs font-semibold uppercase tracking-wide text-primary">Receipt lookup</p>
+          <h1 class="text-3xl font-bold tracking-tight">Check Receipts</h1>
+          <p class="max-w-2xl text-sm leading-6 text-base-content/55">
+            Pick a player and champion to aggregate results across every linked account.
+          </p>
         </div>
 
         <%!-- Main search form --%>
-        <.form for={@search_form} id="receipts-search-form" phx-submit="search">
-          <div class="flex flex-wrap gap-3 items-end">
+        <.form
+          for={@search_form}
+          id="receipts-search-form"
+          phx-submit="search"
+          class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm"
+        >
+          <div class="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
             <div class="flex-1 min-w-40">
               <.input
                 field={@search_form[:player_id]}
@@ -160,34 +212,69 @@ defmodule ReceiptsWeb.ReceiptsLive do
             </div>
             <div class="flex-1 min-w-52">
               <.input
-                field={@search_form[:champion_key]}
-                type="select"
+                field={@search_form[:champion]}
+                type="search"
                 label="Champion"
-                options={[{"— select —", ""} | Enum.map(@champions, &{&1.name, &1.key})]}
+                list="champion-options"
+                placeholder="Type a champion name"
+                autocomplete="off"
               />
+              <datalist id="champion-options">
+                <%= for champion <- @champions do %>
+                  <option value={champion.name}></option>
+                <% end %>
+              </datalist>
             </div>
             <button
               type="submit"
-              class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-content hover:opacity-90 transition-opacity mb-1"
+              class="mb-2 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content transition hover:opacity-90 sm:self-end"
             >
+              <.icon name="hero-magnifying-glass-mini" class="h-4 w-4" />
               Check
             </button>
           </div>
         </.form>
 
         <%!-- Filters --%>
-        <div class="rounded-xl border border-base-300 bg-base-200 p-4 space-y-4">
+        <div class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm space-y-4">
           <%!-- Queue toggles --%>
           <div>
-            <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/50">Queue Types</p>
-            <div class="flex flex-wrap gap-2">
+            <div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                  Game Types
+                </p>
+                <p class="text-xs text-base-content/45">
+                  {MapSet.size(@enabled_queues)} selected
+                </p>
+              </div>
+              <div class="flex gap-2">
+                <button
+                  id="select-all-queues"
+                  type="button"
+                  phx-click="select_all_queues"
+                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-xs font-semibold transition hover:bg-base-300"
+                >
+                  Select all
+                </button>
+                <button
+                  id="clear-queues"
+                  type="button"
+                  phx-click="clear_queues"
+                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-xs font-semibold transition hover:bg-base-300"
+                >
+                  Deselect all
+                </button>
+              </div>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
               <%= for {queue_type, label, _default} <- @queue_defs do %>
                 <button
                   id={"queue-toggle-#{queue_type}"}
                   phx-click="toggle_queue"
                   phx-value-queue={queue_type}
                   class={[
-                    "rounded-full px-3 py-1 text-xs font-medium border transition-colors",
+                    "rounded-lg px-3 py-2 text-left text-xs font-semibold border transition-colors",
                     if(MapSet.member?(@enabled_queues, queue_type),
                       do: "bg-primary text-primary-content border-primary",
                       else: "border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70"
@@ -208,7 +295,7 @@ defmodule ReceiptsWeb.ReceiptsLive do
                 <select
                   id="from-year-select"
                   name="from_year"
-                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
+                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm focus:outline-none focus:border-primary"
                 >
                   <option value="">All time</option>
                   <%= for {label, year} <- Enum.reverse(year_options()) do %>
@@ -221,7 +308,7 @@ defmodule ReceiptsWeb.ReceiptsLive do
                 <select
                   id="to-year-select"
                   name="to_year"
-                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
+                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm focus:outline-none focus:border-primary"
                 >
                   <option value="">Now</option>
                   <%= for {label, year} <- Enum.reverse(year_options()) do %>
@@ -237,18 +324,18 @@ defmodule ReceiptsWeb.ReceiptsLive do
         <%= if @result do %>
           <div id="receipts-result" class="space-y-6">
             <%!-- Champion header --%>
-            <div class="flex items-center gap-4 rounded-xl border border-base-300 bg-base-200 p-5">
+            <div class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-200 p-5 shadow-sm sm:flex-row sm:items-center">
               <img
                 src={champion_icon_url(@result.champion)}
                 alt={@result.champion.name}
                 class="h-16 w-16 rounded-full border-2 border-base-300 object-cover"
                 onerror="this.style.display='none'"
               />
-              <div>
+              <div class="min-w-0 flex-1">
                 <p class="text-xs font-medium uppercase tracking-wide text-base-content/40">
                   {@result_player && @result_player.name} on
                 </p>
-                <h2 class="text-2xl font-bold">{@result.champion.name}</h2>
+                <h2 class="text-3xl font-bold tracking-tight">{@result.champion.name}</h2>
                 <%= if @result.games_played == 0 do %>
                   <p class="text-sm text-base-content/50 mt-1">No games on record for the selected filters</p>
                 <% end %>
@@ -258,17 +345,17 @@ defmodule ReceiptsWeb.ReceiptsLive do
             <%= if @result.games_played > 0 do %>
               <%!-- Stats grid --%>
               <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center">
+                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
                   <p class="text-3xl font-bold">{@result.games_played}</p>
                   <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">Games</p>
                 </div>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center">
+                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
                   <p class={["text-3xl font-bold", win_rate_color(@result.win_rate)]}>
                     {@result.win_rate}%
                   </p>
                   <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">Win Rate</p>
                 </div>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center">
+                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
                   <p class="text-3xl font-bold">
                     {@result.avg_kills}/{@result.avg_deaths}/{@result.avg_assists}
                   </p>
@@ -276,7 +363,7 @@ defmodule ReceiptsWeb.ReceiptsLive do
                     KDA · {@result.kda_ratio}:1
                   </p>
                 </div>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center">
+                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
                   <p class="text-3xl font-bold">{@result.avg_cs}</p>
                   <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">Avg CS</p>
                 </div>
@@ -287,9 +374,9 @@ defmodule ReceiptsWeb.ReceiptsLive do
                 <h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
                   Recent Games
                 </h3>
-                <div class="rounded-xl border border-base-300 bg-base-200 divide-y divide-base-300">
+                <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
                   <%= for game <- @result.recent_games do %>
-                    <div class="flex items-center gap-3 px-4 py-3">
+                    <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 last:border-b-0">
                       <div class={[
                         "w-12 shrink-0 rounded text-center py-0.5 text-xs font-bold",
                         if(game.win, do: "bg-success/20 text-success", else: "bg-error/20 text-error")

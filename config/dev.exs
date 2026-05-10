@@ -29,6 +29,8 @@ config :receipts, ReceiptsWeb.Endpoint,
     tailwind: {Tailwind, :install_and_run, [:receipts, ~w(--watch)]}
   ]
 
+config :live_debugger, auto_port: true
+
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed

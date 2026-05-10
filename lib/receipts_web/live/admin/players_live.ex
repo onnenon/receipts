@@ -73,23 +73,29 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
-        <div class="flex items-center justify-between">
-          <h1 class="text-2xl font-bold tracking-tight">Players</h1>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Admin</p>
+            <h1 class="mt-1 text-3xl font-bold tracking-tight">Players</h1>
+            <p class="mt-1 text-sm text-base-content/55">
+              Link Discord friends to every Riot account they play on.
+            </p>
+          </div>
           <button
             id="open-new-player"
             phx-click="show_modal"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm hover:opacity-90 transition-opacity"
+            class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:opacity-90"
           >
             <.icon name="hero-plus-mini" class="h-4 w-4" /> Add Player
           </button>
         </div>
 
-        <div id="players" phx-update="stream" class="divide-y divide-base-300 rounded-xl border border-base-300 bg-base-200">
+        <div id="players" phx-update="stream" class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
           <div id="players-empty" class="hidden only:flex items-center justify-center py-16 text-base-content/40">
-            No players yet — add one to get started.
+            No players yet. Add one to start collecting receipts.
           </div>
           <%= for {id, player} <- @streams.players do %>
-            <div id={id} class="flex items-center gap-4 px-5 py-4 hover:bg-base-300/40 transition-colors group">
+            <div id={id} class="flex flex-col gap-4 border-b border-base-300 px-5 py-4 transition last:border-b-0 hover:bg-base-300/45 sm:flex-row sm:items-center">
               <div class="flex-1 min-w-0">
                 <p class="font-semibold truncate">{player.name}</p>
                 <p class="text-sm text-base-content/50">
@@ -102,7 +108,7 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
                   <% end %>
                 </p>
               </div>
-              <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div class="flex shrink-0 items-center gap-2">
                 <.link
                   navigate={~p"/receipts?player_id=#{player.id}"}
                   class="rounded-md px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content border border-base-300 hover:bg-base-300 transition-colors"

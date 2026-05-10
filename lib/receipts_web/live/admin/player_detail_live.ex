@@ -211,9 +211,10 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
         </div>
 
         <%!-- Player header --%>
-        <div class="flex items-start justify-between">
+        <div class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-200 p-5 shadow-sm sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 class="text-2xl font-bold tracking-tight">{@player.name}</h1>
+            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Player profile</p>
+            <h1 class="mt-1 text-3xl font-bold tracking-tight">{@player.name}</h1>
             <p class="mt-1 text-sm text-base-content/50">
               <%= if @player.discord_id do %>
                 Discord: {@player.discord_id}
@@ -234,20 +235,24 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
           </div>
           <.link
             navigate={~p"/receipts?player_id=#{@player.id}"}
-            class="inline-flex items-center gap-1.5 rounded-lg border border-base-300 px-3 py-2 text-sm font-medium hover:bg-base-200 transition-colors"
+            class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium transition hover:bg-base-300/60"
           >
-            View Receipts →
+            View Receipts
+            <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
           </.link>
         </div>
 
         <%!-- Accounts --%>
         <div class="space-y-3">
-          <div class="flex items-center justify-between">
-            <h2 class="text-lg font-semibold">Accounts</h2>
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-lg font-semibold">Accounts</h2>
+              <p class="text-sm text-base-content/50">Every linked Riot ID rolls into receipt searches.</p>
+            </div>
             <button
               id="toggle-add-account"
               phx-click="toggle_add_account"
-              class="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+              class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 px-3 py-2 text-sm font-semibold text-primary transition hover:bg-primary/20"
             >
               <.icon name={if @show_add_account, do: "hero-minus-mini", else: "hero-plus-mini"} class="h-4 w-4" />
               {if @show_add_account, do: "Cancel", else: "Add Account"}
@@ -255,10 +260,10 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
           </div>
 
           <%= if @show_add_account do %>
-            <div id="add-account-panel" class="rounded-xl border border-primary/20 bg-base-200 p-5">
+            <div id="add-account-panel" class="rounded-xl border border-primary/20 bg-base-200 p-5 shadow-sm">
               <h3 class="mb-4 text-sm font-semibold text-base-content/70">Add Riot Account</h3>
               <.form for={@add_account_form} id="add-account-form" phx-submit="add_account">
-                <div class="flex gap-3">
+                <div class="flex flex-col gap-3 sm:flex-row">
                   <div class="flex-1">
                     <.input
                       field={@add_account_form[:riot_id]}
@@ -289,16 +294,16 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
             </div>
           <% end %>
 
-          <div id="accounts" phx-update="stream" class="divide-y divide-base-300 rounded-xl border border-base-300 bg-base-200">
+          <div id="accounts" phx-update="stream" class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
             <div id="accounts-empty" class="hidden only:flex items-center justify-center py-10 text-sm text-base-content/40">
               No accounts yet — add one above.
             </div>
             <%= for {id, account} <- @streams.accounts do %>
-              <div id={id} class="flex items-center gap-4 px-5 py-4">
+              <div id={id} class="flex flex-col gap-4 border-b border-base-300 px-5 py-4 last:border-b-0 sm:flex-row sm:items-center">
                 <div class="flex-1 min-w-0">
                   <p class="font-semibold">
                     {account.riot_game_name}#{account.riot_tag_line}
-                    <span class="ml-2 rounded bg-base-300 px-1.5 py-0.5 text-xs font-medium text-base-content/60 uppercase">
+                    <span class="ml-2 rounded-md bg-base-300 px-1.5 py-0.5 text-xs font-medium text-base-content/60 uppercase">
                       {account.riot_region}
                     </span>
                   </p>
@@ -314,7 +319,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                   id={"sync-#{account.id}"}
                   phx-click="sync_now"
                   phx-value-account-id={account.id}
-                  class="rounded-lg border border-base-300 px-3 py-1.5 text-xs font-medium hover:bg-base-300 transition-colors phx-click-loading:opacity-50"
+                  class="inline-flex items-center justify-center rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-xs font-semibold transition hover:bg-base-300 phx-click-loading:opacity-50"
                 >
                   Sync Now
                 </button>

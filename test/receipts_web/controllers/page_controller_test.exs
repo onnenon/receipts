@@ -3,6 +3,6 @@ defmodule ReceiptsWeb.PageControllerTest do
 
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+    assert html_response(conn, 200) =~ "Prove the pick before the loading screen does."
   end
 end

@@ -36,27 +36,27 @@ defmodule ReceiptsWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="sticky top-0 z-50 border-b border-base-300 bg-base-100/95 backdrop-blur-sm">
-      <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <a href="/" class="flex items-center gap-2 font-bold tracking-tight text-primary hover:opacity-80 transition-opacity">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
+    <header class="sticky top-0 z-50 border-b border-base-300 bg-base-100/90 backdrop-blur-md">
+      <div class="mx-auto flex min-h-16 max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <a href="/" class="flex items-center gap-2.5 font-bold tracking-tight text-base-content transition hover:text-primary">
+          <span class="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-content shadow-sm">
+            <.icon name="hero-document-chart-bar-mini" class="h-5 w-5" />
+          </span>
           Receipts
         </a>
-        <nav class="flex items-center gap-6">
-          <a href="/admin/players" class="text-sm font-medium text-base-content/60 hover:text-base-content transition-colors">
-            Players
-          </a>
-          <a href="/receipts" class="text-sm font-medium text-base-content/60 hover:text-base-content transition-colors">
+        <nav class="flex items-center gap-2 overflow-x-auto">
+          <a href="/receipts" class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content">
             Receipts
+          </a>
+          <a href="/admin/players" class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content">
+            Players
           </a>
           <.theme_toggle />
         </nav>
       </div>
     </header>
 
-    <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+    <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       {render_slot(@inner_block)}
     </main>
 
@@ -114,29 +114,32 @@ defmodule ReceiptsWeb.Layouts do
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
+    <div class="relative flex flex-row items-center rounded-full border border-base-300 bg-base-200 p-0.5">
+      <div class="absolute left-0.5 h-8 w-8 rounded-full border border-base-300 bg-base-100 shadow-sm [[data-theme=light]_&]:left-[2.25rem] [[data-theme=dark]_&]:left-[4.25rem] transition-[left]" />
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative z-10 grid h-8 w-8 cursor-pointer place-items-center"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        title="Use system theme"
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative z-10 grid h-8 w-8 cursor-pointer place-items-center"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        title="Use light theme"
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative z-10 grid h-8 w-8 cursor-pointer place-items-center"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        title="Use dark theme"
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
