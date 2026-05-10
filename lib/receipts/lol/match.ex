@@ -6,6 +6,11 @@ defmodule Receipts.LoL.Match do
   postgres do
     table("lol_matches")
     repo(Receipts.Repo)
+
+    custom_indexes do
+      # Recent games sorting and time-range queries
+      index([:game_datetime])
+    end
   end
 
   attributes do

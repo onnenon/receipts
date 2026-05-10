@@ -6,6 +6,13 @@ defmodule Receipts.LoL.MatchParticipant do
   postgres do
     table("lol_match_participants")
     repo(Receipts.Repo)
+
+    custom_indexes do
+      # Core receipts query: player's stats on a champion
+      index([:account_id, :champion_id])
+      # "Playing with" join: find all participants in a match on a given team
+      index([:match_id, :team_id])
+    end
   end
 
   attributes do
@@ -19,6 +26,7 @@ defmodule Receipts.LoL.MatchParticipant do
     attribute(:damage_dealt, :integer, public?: true)
     attribute(:vision_score, :integer, public?: true)
     attribute(:position, :string, public?: true)
+    attribute(:team_id, :integer, public?: true)
 
     attribute :items, {:array, :integer} do
       default([])
@@ -87,6 +95,7 @@ defmodule Receipts.LoL.MatchParticipant do
         :damage_dealt,
         :vision_score,
         :position,
+        :team_id,
         :items,
         :raw_participant
       ])
@@ -103,6 +112,7 @@ defmodule Receipts.LoL.MatchParticipant do
         :damage_dealt,
         :vision_score,
         :position,
+        :team_id,
         :items,
         :raw_participant
       ])

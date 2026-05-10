@@ -179,6 +179,7 @@ defmodule Receipts.Workers.SyncAccount do
           damage_dealt: participant["totalDamageDealtToChampions"],
           vision_score: participant["visionScore"],
           position: if(position == "", do: nil, else: position),
+          team_id: participant["teamId"],
           items: items,
           raw_participant: participant
         })
