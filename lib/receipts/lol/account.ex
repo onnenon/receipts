@@ -40,9 +40,14 @@ defmodule Receipts.LoL.Account do
       public?(true)
     end
 
-    # Pagination index for backward history fetch
+    # Legacy pagination count, retained for display/migration compatibility.
     attribute :oldest_synced_start, :integer do
       default(0)
+      public?(true)
+    end
+
+    # Timestamp cursor for the oldest match in the contiguous history window already traversed.
+    attribute :oldest_synced_at, :utc_datetime_usec do
       public?(true)
     end
 
@@ -91,6 +96,7 @@ defmodule Receipts.LoL.Account do
         :riot_tag_line,
         :newest_synced_at,
         :oldest_synced_start,
+        :oldest_synced_at,
         :history_fully_synced
       ]
     ])

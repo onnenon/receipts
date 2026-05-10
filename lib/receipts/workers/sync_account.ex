@@ -152,11 +152,11 @@ defmodule Receipts.Workers.SyncAccount do
   end
 
   defp backward_pass(account, champion_map, tag) do
-    # Using offset (start) is reliable for backfill IF forward_pass has fetched everything 
-    # between now() and our history tip.
-    params = [start: account.oldest_synced_start, count: @backward_page_size]
+    params = backward_params(account)
 
-    Logger.info("[SyncAccount] Backward pass: offset #{account.oldest_synced_start} for #{tag}")
+    Logger.info(
+      "[SyncAccount] Backward pass: before #{account.oldest_synced_at || "current tip"} for #{tag}"
+    )
 
     case @riot_client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
       {:ok, []} ->
@@ -174,20 +174,27 @@ defmodule Receipts.Workers.SyncAccount do
 
         case process_match_ids(match_ids, account, champion_map, tag) do
           :ok ->
-            # Increment offset by exactly how many IDs we were given, even if we skipped them.
-            # This ensures we always move backward and never get stuck.
-            new_offset = account.oldest_synced_start + length(match_ids)
+            case get_match_timestamp(List.last(match_ids), account.riot_routing) do
+              {:ok, oldest_ts} ->
+                new_count = account.oldest_synced_start + length(match_ids)
 
-            account
-            |> Ash.Changeset.for_update(:update, %{
-              oldest_synced_start: new_offset,
-              history_fully_synced: false
-            })
-            |> Ash.update!()
+                account
+                |> Ash.Changeset.for_update(:update, %{
+                  oldest_synced_start: new_count,
+                  oldest_synced_at: oldest_ts,
+                  history_fully_synced: false
+                })
+                |> Ash.update!()
 
-            Logger.info("[SyncAccount] Backward pass done: new offset #{new_offset} for #{tag}")
+                Logger.info(
+                  "[SyncAccount] Backward pass done: oldest synced at #{oldest_ts} for #{tag}"
+                )
 
-            :ok
+                :ok
+
+              {:error, _} = error ->
+                error
+            end
 
           {:snooze, _} = snooze ->
             snooze
@@ -204,6 +211,12 @@ defmodule Receipts.Workers.SyncAccount do
         Logger.error("[SyncAccount] Backward pass failed for #{tag}: #{inspect(reason)}")
         {:error, {:backward_pass, reason}}
     end
+  end
+
+  defp backward_params(%{oldest_synced_at: nil}), do: [start: 0, count: @backward_page_size]
+
+  defp backward_params(%{oldest_synced_at: oldest_synced_at}) do
+    [endTime: DateTime.to_unix(oldest_synced_at, :second) - 1, count: @backward_page_size]
   end
 
   # --- Match processing ---

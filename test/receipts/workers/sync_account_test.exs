@@ -121,6 +121,49 @@ defmodule Receipts.Workers.SyncAccountTest do
     assert participant_count(account) == 0
   end
 
+  test "backward pass continues from the oldest synced timestamp instead of an offset", %{
+    account: account,
+    champion: champion
+  } do
+    newest_synced_at = ~U[2026-05-10 12:00:00Z]
+    oldest_synced_at = ~U[2026-05-09 12:00:00Z]
+
+    account =
+      update_account!(account, %{
+        newest_synced_at: newest_synced_at,
+        oldest_synced_start: 50,
+        oldest_synced_at: oldest_synced_at,
+        history_fully_synced: false
+      })
+
+    matches = build_matches(account, champion, 10, DateTime.add(oldest_synced_at, -60, :second))
+
+    stub_match_ids_from_matches(matches)
+    stub_match_details(matches)
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    account = Ash.get!(Account, account.id)
+    assert account.oldest_synced_start == 60
+
+    assert DateTime.compare(
+             account.oldest_synced_at,
+             DateTime.add(oldest_synced_at, -600, :second)
+           ) == :eq
+
+    assert [
+             {_forward_puuid, _forward_routing, forward_opts},
+             {_backward_puuid, _backward_routing, backward_opts}
+           ] = RiotClientStub.match_id_calls()
+
+    assert Keyword.fetch!(forward_opts, :startTime) == DateTime.to_unix(newest_synced_at, :second)
+
+    assert Keyword.fetch!(backward_opts, :endTime) ==
+             DateTime.to_unix(oldest_synced_at, :second) - 1
+
+    refute Keyword.has_key?(backward_opts, :start)
+  end
+
   defp build_matches(account, champion, count, base_time) do
     0..(count - 1)
     |> Enum.map(fn index ->
