@@ -1,6 +1,7 @@
 defmodule Receipts.Workers.SyncAccount do
   use Oban.Worker, queue: :sync, max_attempts: 3
 
+  require Ash.Query
   require Logger
 
   # One backward page per job run; forward pass grabs up to 100 new matches.
@@ -82,9 +83,18 @@ defmodule Receipts.Workers.SyncAccount do
   end
 
   defp backward_pass(account, champion_map, tag) do
-    params = [start: account.oldest_synced_start, count: @backward_page_size]
+    account = Ash.load!(account, [:oldest_game_datetime])
 
-    Logger.info("[SyncAccount] Backward pass: offset #{account.oldest_synced_start} for #{tag}")
+    params =
+      if account.oldest_game_datetime do
+        [endTime: DateTime.to_unix(account.oldest_game_datetime, :second) - 1, count: @backward_page_size]
+      else
+        [start: 0, count: @backward_page_size]
+      end
+
+    Logger.info(
+      "[SyncAccount] Backward pass: fetching before #{account.oldest_game_datetime || "beginning"} for #{tag}"
+    )
 
     case Receipts.Riot.Client.get_match_ids(account.riot_puuid, account.riot_routing, params) do
       {:ok, []} ->
@@ -102,18 +112,18 @@ defmodule Receipts.Workers.SyncAccount do
 
         case process_match_ids(match_ids, account, champion_map, tag) do
           :ok ->
-            new_start = account.oldest_synced_start + length(match_ids)
-            fully_synced = length(match_ids) < @backward_page_size
+            # Update the count for the UI; the next run will use account.oldest_game_datetime
+            new_count = count_indexed_games(account)
 
             account
             |> Ash.Changeset.for_update(:update, %{
-              oldest_synced_start: new_start,
-              history_fully_synced: fully_synced
+              oldest_synced_start: new_count,
+              history_fully_synced: false
             })
             |> Ash.update!()
 
             Logger.info(
-              "[SyncAccount] Backward pass done: offset #{new_start}, fully_synced=#{fully_synced} for #{tag}"
+              "[SyncAccount] Backward pass done: #{new_count} total games indexed for #{tag}"
             )
 
             :ok
@@ -133,6 +143,12 @@ defmodule Receipts.Workers.SyncAccount do
         Logger.error("[SyncAccount] Backward pass failed for #{tag}: #{inspect(reason)}")
         {:error, {:backward_pass, reason}}
     end
+  end
+
+  defp count_indexed_games(account) do
+    Receipts.LoL.MatchParticipant
+    |> Ash.Query.filter(account_id == ^account.id)
+    |> Ash.count!()
   end
 
   # --- Match processing ---

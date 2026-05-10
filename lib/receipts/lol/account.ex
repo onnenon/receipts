@@ -67,6 +67,12 @@ defmodule Receipts.LoL.Account do
     has_many(:match_participants, Receipts.LoL.MatchParticipant)
   end
 
+  aggregates do
+    first :oldest_game_datetime, [:match_participants, :match], :game_datetime do
+      sort game_datetime: :asc
+    end
+  end
+
   actions do
     defaults([
       :read,
