@@ -4,7 +4,7 @@ defmodule Receipts.Workers.SyncAccount do
   require Logger
 
   # One backward page per job run; forward pass grabs up to 100 new matches.
-  @backward_page_size 100
+  @backward_page_size 50
   @forward_page_size 100
 
   @impl Oban.Worker
