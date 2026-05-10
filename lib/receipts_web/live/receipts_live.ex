@@ -15,6 +15,7 @@ defmodule ReceiptsWeb.ReceiptsLive do
     {:ok,
      socket
      |> assign(:players, players)
+     |> assign(:player_top_champions, Queries.player_top_champions(players))
      |> assign(:champions, champions)
      |> assign(:enabled_queues, MapSet.new(Queue.default_queues()))
      |> assign(:from_year, nil)
@@ -175,6 +176,10 @@ defmodule ReceiptsWeb.ReceiptsLive do
   defp win_rate_color(rate) when rate < 45.0, do: "text-error"
   defp win_rate_color(_), do: "text-base-content"
 
+  defp top_champion_for(player_top_champions, player) do
+    Map.get(player_top_champions, player.id)
+  end
+
   defp year_options do
     for year <- @earliest_year..@current_year//1, do: {to_string(year), year}
   end
@@ -234,6 +239,67 @@ defmodule ReceiptsWeb.ReceiptsLive do
             </button>
           </div>
         </.form>
+
+        <div
+          id="player-top-champions"
+          class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm"
+        >
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                Most Played Champs
+              </h2>
+              <p class="text-xs text-base-content/45">
+                All-time leader for each player across linked accounts
+              </p>
+            </div>
+          </div>
+
+          <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <%= for player <- @players do %>
+              <% top_champion = top_champion_for(@player_top_champions, player) %>
+              <div
+                id={"player-top-champion-#{player.id}"}
+                class="flex items-center gap-3 rounded-lg border border-base-300 bg-base-100 px-3 py-2"
+              >
+                <%= if top_champion do %>
+                  <img
+                    src={champion_icon_url(top_champion.champion)}
+                    alt={top_champion.champion.name}
+                    class="h-10 w-10 rounded-full border border-base-300 object-cover"
+                    onerror="this.style.display='none'"
+                  />
+                <% else %>
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full border border-base-300 bg-base-200 text-base-content/35">
+                    <.icon name="hero-question-mark-circle" class="h-5 w-5" />
+                  </div>
+                <% end %>
+
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-semibold">{player.name}</p>
+                  <%= if top_champion do %>
+                    <p class="truncate text-xs text-base-content/50">
+                      {top_champion.champion.name} · {top_champion.games_played} games
+                    </p>
+                  <% else %>
+                    <p class="truncate text-xs text-base-content/40">No games yet</p>
+                  <% end %>
+                </div>
+
+                <%= if top_champion do %>
+                  <div class="shrink-0 text-right">
+                    <p class={["text-sm font-bold", win_rate_color(top_champion.win_rate)]}>
+                      {top_champion.win_rate}%
+                    </p>
+                    <p class="text-[0.65rem] font-medium uppercase tracking-wide text-base-content/40">
+                      WR
+                    </p>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </div>
 
         <%!-- Filters --%>
         <div class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm space-y-4">

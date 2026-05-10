@@ -29,7 +29,6 @@ config :swoosh, :api_client, false
 config :receipts, Oban, testing: :inline
 
 config :receipts, :riot_client, Receipts.RiotClientStub
-config :receipts, refresh_account_identities_on_startup: false
 
 # Print only warnings and errors during test
 config :logger, level: :warning

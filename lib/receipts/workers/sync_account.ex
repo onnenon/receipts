@@ -15,6 +15,7 @@ defmodule Receipts.Workers.SyncAccount do
     champion_map = load_champion_map()
 
     Logger.info("[SyncAccount] Starting sync for #{tag}")
+    backfill_stored_matches(account, champion_map, tag)
 
     # Forward pass handles new matches; backward pass handles historical backfill.
     # We run forward first to ensure newest_synced_at is up to date.
@@ -332,6 +333,17 @@ defmodule Receipts.Workers.SyncAccount do
 
   defp find_participant(participants, puuid) do
     Enum.find(participants, fn p -> p["puuid"] == puuid end)
+  end
+
+  defp backfill_stored_matches(account, champion_map, tag) do
+    case Receipts.LoL.StoredMatchParticipantBackfill.backfill_account(account, champion_map) do
+      {:ok, 0} ->
+        :ok
+
+      {:ok, count} ->
+        Logger.info("[SyncAccount] Backfilled #{count} stored match participant(s) for #{tag}")
+        :ok
+    end
   end
 
   defp upsert_match_and_participant(match_id, info, participant, account, champion_map) do

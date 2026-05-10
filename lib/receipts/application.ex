@@ -20,10 +20,8 @@ defmodule Receipts.Application do
         {DNSCluster, query: Application.get_env(:receipts, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Receipts.PubSub},
         {Oban, Application.fetch_env!(:receipts, Oban)},
-        account_identity_refresher_child(),
         ReceiptsWeb.Endpoint
       ]
-      |> Enum.reject(&is_nil/1)
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
@@ -66,11 +64,5 @@ defmodule Receipts.Application do
 
   defp skip_migrations?() do
     System.get_env("RELEASE_NAME") != nil
-  end
-
-  defp account_identity_refresher_child do
-    if Application.get_env(:receipts, :refresh_account_identities_on_startup, true) do
-      {Task, fn -> Receipts.Riot.AccountIdentityRefresher.refresh_all() end}
-    end
   end
 end

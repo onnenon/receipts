@@ -161,6 +161,72 @@ defmodule Receipts.Workers.SyncAccountTest do
     assert account.oldest_synced_start == 50
   end
 
+  test "sync backfills participant rows from stored matches that include the account puuid", %{
+    account: account,
+    champion: champion
+  } do
+    other_player =
+      Player
+      |> Ash.Changeset.for_create(:create, %{name: "Other Player", discord_id: unique_id()})
+      |> Ash.create!()
+
+    other_account =
+      Account
+      |> Ash.Changeset.for_create(:create, %{
+        riot_puuid: unique_id(),
+        riot_game_name: "Other",
+        riot_tag_line: "NA1",
+        riot_region: "na1",
+        riot_routing: "americas",
+        player_id: other_player.id
+      })
+      |> Ash.create!()
+
+    match =
+      Match
+      |> Ash.Changeset.for_create(:sync, %{
+        riot_match_id: "NA1_shared_existing",
+        game_datetime: ~U[2024-06-08 02:34:30Z],
+        game_duration_seconds: 1800,
+        queue_id: 420,
+        queue_type: "ranked_solo",
+        raw_info: %{
+          "gameStartTimestamp" => DateTime.to_unix(~U[2024-06-08 02:34:30Z], :millisecond),
+          "gameDuration" => 1800,
+          "queueId" => 420,
+          "participants" => [
+            participant_payload(account, champion, true),
+            participant_payload(other_account, champion, false)
+          ]
+        }
+      })
+      |> Ash.create!()
+
+    MatchParticipant
+    |> Ash.Changeset.for_create(:sync, %{
+      match_id: match.id,
+      account_id: other_account.id,
+      champion_id: champion.id,
+      kills: 1,
+      deaths: 2,
+      assists: 3,
+      win: false,
+      cs: 100,
+      damage_dealt: 10_000,
+      vision_score: 12,
+      position: "TOP",
+      team_id: 200,
+      items: [],
+      raw_participant: participant_payload(other_account, champion, false)
+    })
+    |> Ash.create!()
+
+    RiotClientStub.put_match_ids(fn _puuid, _routing, _opts -> {:ok, []} end)
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+    assert participant_count(account) == 1
+  end
+
   test "match id rate limiting does not mark history fully synced", %{account: account} do
     checkpoint = ~U[2026-05-10 12:00:00Z]
     account = update_account!(account, %{newest_synced_at: checkpoint})
@@ -294,6 +360,30 @@ defmodule Receipts.Workers.SyncAccountTest do
     RiotClientStub.put_matches(fn match_id, _routing ->
       {:ok, Map.fetch!(match_map, match_id)}
     end)
+  end
+
+  defp participant_payload(account, champion, win) do
+    %{
+      "puuid" => account.riot_puuid,
+      "championId" => champion.riot_id,
+      "kills" => 7,
+      "deaths" => 3,
+      "assists" => 9,
+      "win" => win,
+      "totalMinionsKilled" => 180,
+      "neutralMinionsKilled" => 12,
+      "totalDamageDealtToChampions" => 22_000,
+      "visionScore" => 28,
+      "teamPosition" => "MIDDLE",
+      "teamId" => 100,
+      "item0" => 1001,
+      "item1" => 1002,
+      "item2" => 1003,
+      "item3" => 1004,
+      "item4" => 1005,
+      "item5" => 1006,
+      "item6" => 3364
+    }
   end
 
   defp participant_count(account) do

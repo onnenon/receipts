@@ -130,11 +130,19 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
       <%= if @show_modal do %>
         <div
           id="new-player-modal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          phx-click="close_modal"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
         >
+          <button
+            type="button"
+            id="new-player-modal-backdrop"
+            class="absolute inset-0"
+            phx-click="close_modal"
+            aria-label="Close new player form"
+          />
+
           <div
-            class="w-full max-w-md rounded-2xl bg-base-100 p-6 shadow-2xl"
+            id="new-player-modal-panel"
+            class="relative w-full max-w-md rounded-2xl bg-base-100 p-6 shadow-2xl"
             phx-click-away="close_modal"
           >
             <div class="mb-5 flex items-center justify-between">
@@ -149,7 +157,6 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
               id="new-player-form"
               phx-change="validate"
               phx-submit="save"
-              phx-click-away=""
             >
               <div class="space-y-4">
                 <.input field={@form[:name]} type="text" label="Name" placeholder="koozie" required />

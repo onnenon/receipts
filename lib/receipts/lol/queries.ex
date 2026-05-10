@@ -23,6 +23,56 @@ defmodule Receipts.LoL.Queries do
     end
   end
 
+  def player_top_champions(players) do
+    player_ids = Enum.map(players, & &1.id)
+
+    accounts =
+      Account
+      |> Ash.Query.filter(player_id in ^player_ids)
+      |> Ash.read!()
+
+    account_player_ids = Map.new(accounts, &{&1.id, &1.player_id})
+    account_ids = Map.keys(account_player_ids)
+
+    participants =
+      if account_ids == [] do
+        []
+      else
+        MatchParticipant
+        |> Ash.Query.filter(account_id in ^account_ids)
+        |> Ash.Query.load(:champion)
+        |> Ash.read!()
+      end
+
+    participants
+    |> Enum.group_by(fn participant ->
+      {Map.fetch!(account_player_ids, participant.account_id), participant.champion_id}
+    end)
+    |> Enum.map(fn {{player_id, _champion_id}, champion_participants} ->
+      games_played = length(champion_participants)
+      wins = Enum.count(champion_participants, & &1.win)
+      win_rate = if games_played > 0, do: Float.round(wins / games_played * 100, 1), else: 0.0
+      champion = champion_participants |> List.first() |> Map.fetch!(:champion)
+
+      %{
+        player_id: player_id,
+        champion: champion,
+        games_played: games_played,
+        wins: wins,
+        win_rate: win_rate
+      }
+    end)
+    |> Enum.group_by(& &1.player_id)
+    |> Map.new(fn {player_id, summaries} ->
+      top =
+        summaries
+        |> Enum.sort_by(&{-&1.games_played, &1.champion.name})
+        |> List.first()
+
+      {player_id, top}
+    end)
+  end
+
   defp find_champion(name) do
     Ash.read!(Champion)
     |> Enum.find(fn c ->
