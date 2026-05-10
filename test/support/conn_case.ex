@@ -27,6 +27,7 @@ defmodule ReceiptsWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
+      import Phoenix.LiveViewTest
       import ReceiptsWeb.ConnCase
     end
   end

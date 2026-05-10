@@ -4,8 +4,9 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
   require Ash.Query
 
   alias Receipts.LoL.{Player, Account, MatchParticipant}
-  alias Receipts.Riot.Client
   alias Receipts.Workers.SyncAccount
+
+  @riot_client Application.compile_env(:receipts, :riot_client, Receipts.Riot.Client)
 
   @regions [
     {"NA", "na1", "americas"},
@@ -67,7 +68,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
       {:ok, game_name, tag_line} ->
         {platform, routing} = region_platform(region)
 
-        case Client.get_account_by_riot_id(game_name, tag_line, routing) do
+        case @riot_client.get_account_by_riot_id(game_name, tag_line, routing) do
           {:ok, %{"puuid" => puuid}} ->
             attrs = %{
               player_id: socket.assigns.player.id,
