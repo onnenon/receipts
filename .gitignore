@@ -11,3 +11,5 @@ erl_crash.dump
 
 .vscode
 .claude
+
+*.db*
