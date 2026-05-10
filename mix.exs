@@ -41,6 +41,7 @@ defmodule Receipts.MixProject do
   defp deps do
     [
       {:usage_rules, "~> 1.0", only: [:dev]},
+      {:dotenvy, "~> 1.0"},
       {:ash_ai, "~> 0.6"},
       {:live_debugger, "~> 1.0", only: [:dev]},
       {:oban_web, "~> 2.0"},

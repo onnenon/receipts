@@ -9,7 +9,13 @@ import Config
 
 config :receipts,
   ecto_repos: [Receipts.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  ash_domains: [Receipts.LoL]
+
+config :receipts, Oban,
+  repo: Receipts.Repo,
+  plugins: [Oban.Plugins.Pruner],
+  queues: [default: 10, sync: 5, data_dragon: 2]
 
 # Configure the endpoint
 config :receipts, ReceiptsWeb.Endpoint,

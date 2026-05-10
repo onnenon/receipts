@@ -1,5 +1,20 @@
 import Config
 
+if config_env() in [:dev, :test] do
+  Dotenvy.source!([".env.#{config_env()}", ".env", System.get_env()])
+end
+
+config :receipts, :riot,
+  api_key: System.get_env("RIOT_API_KEY")
+
+config :receipts, :discord,
+  application_id: System.get_env("DISCORD_APPLICATION_ID"),
+  bot_token: System.get_env("DISCORD_BOT_TOKEN"),
+  public_key: System.get_env("DISCORD_PUBLIC_KEY")
+
+config :receipts, :gemini,
+  api_key: System.get_env("GEMINI_API_KEY")
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration

@@ -13,3 +13,5 @@ erl_crash.dump
 .claude
 
 *.db*
+.env
+.env.local

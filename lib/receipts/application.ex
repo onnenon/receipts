@@ -14,9 +14,7 @@ defmodule Receipts.Application do
        repos: Application.fetch_env!(:receipts, :ecto_repos), skip: skip_migrations?()},
       {DNSCluster, query: Application.get_env(:receipts, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Receipts.PubSub},
-      # Start a worker by calling: Receipts.Worker.start_link(arg)
-      # {Receipts.Worker, arg},
-      # Start to serve requests, typically the last entry
+      {Oban, Application.fetch_env!(:receipts, Oban)},
       ReceiptsWeb.Endpoint
     ]
 
@@ -35,7 +33,6 @@ defmodule Receipts.Application do
   end
 
   defp skip_migrations?() do
-    # By default, sqlite migrations are run when using a release
-    System.get_env("RELEASE_NAME") == nil
+    System.get_env("RELEASE_NAME") != nil
   end
 end
