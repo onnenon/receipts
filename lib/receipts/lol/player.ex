@@ -31,6 +31,16 @@ defmodule Receipts.LoL.Player do
     has_many(:accounts, Receipts.LoL.Account)
   end
 
+  aggregates do
+    first :oldest_game_date, [:accounts, :match_participants, :match], :game_datetime do
+      sort game_datetime: :asc
+    end
+
+    first :newest_game_date, [:accounts, :match_participants, :match], :game_datetime do
+      sort game_datetime: :desc
+    end
+  end
+
   actions do
     defaults([:read, :destroy, create: [:name, :discord_id], update: [:name, :discord_id]])
   end

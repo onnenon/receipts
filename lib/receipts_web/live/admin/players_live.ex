@@ -10,7 +10,7 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
   def mount(_params, _session, socket) do
     players =
       Player
-      |> Ash.Query.load(:accounts)
+      |> Ash.Query.load([:accounts, :oldest_game_date, :newest_game_date])
       |> Ash.read!()
 
     {:ok,
@@ -43,7 +43,7 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
         player_with_accounts =
           Player
           |> Ash.Query.filter(id == ^player.id)
-          |> Ash.Query.load(:accounts)
+          |> Ash.Query.load([:accounts, :oldest_game_date, :newest_game_date])
           |> Ash.read!()
           |> List.first()
 
@@ -60,6 +60,12 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
 
   defp new_player_form do
     AshForm.for_create(Player, :create, as: "player", domain: Receipts.LoL) |> to_form()
+  end
+
+  defp format_date(nil), do: ""
+
+  defp format_date(dt) do
+    Calendar.strftime(dt, "%b %d, %Y")
   end
 
   @impl true
@@ -90,6 +96,9 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
                   {account_summary(player.accounts)}
                   <%= if player.discord_id do %>
                     · Discord: {player.discord_id}
+                  <% end %>
+                  <%= if player.oldest_game_date do %>
+                    · {format_date(player.oldest_game_date)} – {format_date(player.newest_game_date)}
                   <% end %>
                 </p>
               </div>

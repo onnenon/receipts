@@ -26,7 +26,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
     player =
       Player
       |> Ash.Query.filter(id == ^id)
-      |> Ash.Query.load(:accounts)
+      |> Ash.Query.load([:accounts, :oldest_game_date, :newest_game_date])
       |> Ash.read!()
       |> List.first()
 
@@ -187,6 +187,12 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
     end
   end
 
+  defp format_date(nil), do: "N/A"
+
+  defp format_date(dt) do
+    Calendar.strftime(dt, "%b %d, %Y")
+  end
+
   @impl true
   def render(assigns) do
     assigns = assign(assigns, :region_options, region_options())
@@ -217,6 +223,12 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
             <div class="mt-2 flex items-center gap-1.5 text-sm">
               <span class="font-semibold text-base-content">{@total_games}</span>
               <span class="text-base-content/50">total games indexed</span>
+              <%= if @player.oldest_game_date do %>
+                <span class="text-base-content/30">·</span>
+                <span class="text-base-content/50">
+                  {format_date(@player.oldest_game_date)} – {format_date(@player.newest_game_date)}
+                </span>
+              <% end %>
             </div>
           </div>
           <.link
