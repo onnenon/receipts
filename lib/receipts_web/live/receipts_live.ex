@@ -65,16 +65,10 @@ defmodule ReceiptsWeb.ReceiptsLive do
   end
 
   @impl true
-  def handle_event("set_from_year", %{"year" => year}, socket) do
-    from_year = if year == "", do: nil, else: String.to_integer(year)
-    socket = assign(socket, :from_year, from_year)
-    {:noreply, maybe_rerun(socket)}
-  end
-
-  @impl true
-  def handle_event("set_to_year", %{"year" => year}, socket) do
-    to_year = if year == "", do: nil, else: String.to_integer(year)
-    socket = assign(socket, :to_year, to_year)
+  def handle_event("update_years", %{"from_year" => from, "to_year" => to}, socket) do
+    from_year = if from == "", do: nil, else: String.to_integer(from)
+    to_year = if to == "", do: nil, else: String.to_integer(to)
+    socket = socket |> assign(:from_year, from_year) |> assign(:to_year, to_year)
     {:noreply, maybe_rerun(socket)}
   end
 
@@ -207,36 +201,36 @@ defmodule ReceiptsWeb.ReceiptsLive do
           </div>
 
           <%!-- Year range --%>
-          <div class="flex flex-wrap gap-4 items-end">
-            <div>
-              <p class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">From Year</p>
-              <select
-                id="from-year-select"
-                phx-change="set_from_year"
-                name="year"
-                class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
-              >
-                <option value="">All time</option>
-                <%= for {label, year} <- Enum.reverse(year_options()) do %>
-                  <option value={year} selected={@from_year == year}>{label}</option>
-                <% end %>
-              </select>
+          <form id="year-filter-form" phx-change="update_years">
+            <div class="flex flex-wrap gap-4 items-end">
+              <div>
+                <p class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">From Year</p>
+                <select
+                  id="from-year-select"
+                  name="from_year"
+                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
+                >
+                  <option value="">All time</option>
+                  <%= for {label, year} <- Enum.reverse(year_options()) do %>
+                    <option value={year} selected={@from_year == year}>{label}</option>
+                  <% end %>
+                </select>
+              </div>
+              <div>
+                <p class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">To Year</p>
+                <select
+                  id="to-year-select"
+                  name="to_year"
+                  class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
+                >
+                  <option value="">Now</option>
+                  <%= for {label, year} <- Enum.reverse(year_options()) do %>
+                    <option value={year} selected={@to_year == year}>{label}</option>
+                  <% end %>
+                </select>
+              </div>
             </div>
-            <div>
-              <p class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">To Year</p>
-              <select
-                id="to-year-select"
-                phx-change="set_to_year"
-                name="year"
-                class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
-              >
-                <option value="">Now</option>
-                <%= for {label, year} <- Enum.reverse(year_options()) do %>
-                  <option value={year} selected={@to_year == year}>{label}</option>
-                <% end %>
-              </select>
-            </div>
-          </div>
+          </form>
         </div>
 
         <%!-- Results --%>
