@@ -1,3 +1,56 @@
+# Receipts
+
+A League of Legends "receipts" app for a private friend group. When someone picks a champion in a game together, friends can call a Discord command to pull up that person's stats on that champion — proving (or disproving) that they actually know how to play it.
+
+## What it does
+
+- Discord slash commands (e.g. `/receipts @friend Yasuo`) return a summary of a player's performance on a given champion across all their League accounts
+- A Phoenix web UI exposes the same underlying queries for local testing and browsing
+- An AI summary (Google Gemini Flash) can be generated from the raw stats
+- Match data is fetched from the Riot API and cached incrementally in Postgres
+
+## Architecture
+
+### Stack
+- **Phoenix 1.8** with LiveView for the web UI
+- **Ash Framework 3.x** for all domain resources
+- **Postgres** (via `ash_postgres`) as the database
+- **Oban** (via `ash_oban`) for background sync jobs
+- **Req** for all HTTP calls (Riot API, Gemini API, Discord API)
+- **Docker Compose** for local Postgres (`make dev` to start everything)
+
+### Discord integration
+Uses Discord's Interactions API (webhook-based, no persistent gateway connection). Discord POSTs to a Phoenix controller endpoint when a slash command is used. The controller verifies the Ed25519 signature, dispatches to the appropriate command handler, and returns a response. Commands are registered via the Discord API.
+
+### Domain resources (Ash)
+
+- **`Receipts.LoL.Player`** — a friend in the group. Has many Accounts. Linked to a Discord user ID. Registration is admin-only (no self-service).
+- **`Receipts.LoL.Account`** — a Riot account (PUUID, summoner name, region). Belongs to a Player. A player can have multiple accounts (banned accounts etc.). Holds sync state: `newest_synced_at`, `oldest_synced_start`, `history_fully_synced`.
+- **`Receipts.LoL.Champion`** — League champion, synced from Riot Data Dragon. Fields: `riot_id`, `name`, `key`, `image`.
+- **`Receipts.LoL.Match`** — a game, deduplicated by `riot_match_id`. Fields: `game_datetime`, `game_duration_seconds`, `queue_id`, plus `raw_info` (full JSON blob).
+- **`Receipts.LoL.MatchParticipant`** — joins Account + Match + Champion. Normalized columns for common queries (`kills`, `deaths`, `assists`, `win`, `cs`, `damage_dealt`, `vision_score`, `position`, `items`), plus `raw_participant` (full JSON blob) for ad-hoc access and AI context.
+
+### Riot API caching strategy
+Incremental two-cursor sync per Account:
+- **Forward cursor** (`newest_synced_at`): fetches matches newer than the last sync to keep data fresh
+- **Backward cursor** (`oldest_synced_start`): pages backward through history one batch at a time until `history_fully_synced` is true
+- Match deduplication: `Match` is keyed on `riot_match_id` globally — if two friends were in the same game, one `Match` row, multiple `MatchParticipant` rows
+- An Oban scheduled job sweeps all accounts hourly and enqueues sync for accounts not synced in the last 30 minutes
+- Discord commands can trigger an immediate sync if an account is stale
+
+### "Receipts" query
+Aggregates `MatchParticipant` rows across **all** Accounts belonging to a Player for a given Champion. Returns win rate, KDA, games played, recent game breakdown, and optionally an AI-generated summary.
+
+## Local development
+
+```bash
+make dev        # start Postgres + Phoenix server
+make db.setup   # create and migrate DB (first time)
+make db.reset   # drop and recreate DB
+```
+
+---
+
 This is a web application written using the Phoenix web framework.
 
 ## Project guidelines
