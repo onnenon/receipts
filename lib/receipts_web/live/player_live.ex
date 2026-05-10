@@ -40,7 +40,7 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:from_year, nil)
          |> assign(:to_year, nil)
          |> assign(:selected_champion, nil)
-         |> assign(:champion_search, "")
+         |> assign(:champion_filter, "")
          |> assign(:champion_sort, :games)
          |> assign(:champion_limit, nil)
          |> assign(:filters_open, true)
@@ -64,7 +64,6 @@ defmodule ReceiptsWeb.PlayerLive do
             socket =
               socket
               |> assign(:selected_champion, champion)
-              |> assign(:champion_search, champion.name)
 
             {:noreply, run_query(socket)}
         end
@@ -78,22 +77,9 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   @impl true
-  def handle_event("search_champion", %{"champion" => champion_query}, socket)
-      when champion_query != "" do
-    case find_champion(socket.assigns.all_champions, champion_query) do
-      nil ->
-        {:noreply,
-         put_flash(socket, :error, "Champion not found. Try a name like Ahri or Yasuo.")}
-
-      champion ->
-        {:noreply,
-         push_patch(socket,
-           to: ~p"/players/#{socket.assigns.player.id}?champion=#{champion.key}"
-         )}
-    end
+  def handle_event("filter_champions", %{"champion" => query}, socket) do
+    {:noreply, assign(socket, :champion_filter, query)}
   end
-
-  def handle_event("search_champion", _, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("toggle_filters", _, socket) do
@@ -243,6 +229,13 @@ defmodule ReceiptsWeb.PlayerLive do
     "https://www.op.gg/summoners/#{slug}/#{encoded}"
   end
 
+  defp filter_champions_by_name(champions, ""), do: champions
+
+  defp filter_champions_by_name(champions, query) do
+    normalized = String.downcase(query)
+    Enum.filter(champions, &String.contains?(String.downcase(&1.champion.name), normalized))
+  end
+
   defp apply_sort_and_limit(top_champions, sort_by, limit) do
     sorted =
       case sort_by do
@@ -312,7 +305,9 @@ defmodule ReceiptsWeb.PlayerLive do
       |> assign(:overall_wr, overall_win_rate(assigns.top_champions))
       |> assign(
         :displayed_champions,
-        apply_sort_and_limit(assigns.top_champions, assigns.champion_sort, assigns.champion_limit)
+        assigns.top_champions
+        |> filter_champions_by_name(assigns.champion_filter)
+        |> apply_sort_and_limit(assigns.champion_sort, assigns.champion_limit)
       )
 
     ~H"""
@@ -484,11 +479,11 @@ defmodule ReceiptsWeb.PlayerLive do
 
         <%!-- Champion roster (collapsible) --%>
         <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
-          <div class="flex items-center justify-between gap-3 px-4 py-3">
+          <div class="flex items-center gap-3 px-4 py-3">
             <button
               id="toggle-champions-btn"
               phx-click="toggle_champions"
-              class="flex flex-1 items-center justify-between gap-3 text-left transition hover:opacity-80"
+              class="flex items-center gap-2 text-left transition hover:opacity-80"
             >
               <div>
                 <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
@@ -506,7 +501,9 @@ defmodule ReceiptsWeb.PlayerLive do
               />
             </button>
 
-            <form id="champion-search-form" phx-submit="search_champion" class="flex gap-2">
+            <div class="flex-1" />
+
+            <form id="champion-search-form" phx-change="filter_champions">
               <div class="relative">
                 <.icon
                   name="hero-magnifying-glass-mini"
@@ -516,24 +513,12 @@ defmodule ReceiptsWeb.PlayerLive do
                   id="champion-search-input"
                   type="search"
                   name="champion"
-                  value={@champion_search}
-                  placeholder="Search champion…"
-                  list="champion-options-player"
+                  value={@champion_filter}
+                  placeholder="Filter champions…"
                   autocomplete="off"
                   class="rounded-lg border border-base-300 bg-base-100 py-2 pl-8 pr-3 text-sm focus:border-primary focus:outline-none"
                 />
-                <datalist id="champion-options-player">
-                  <%= for champion <- @all_champions do %>
-                    <option value={champion.name}></option>
-                  <% end %>
-                </datalist>
               </div>
-              <button
-                type="submit"
-                class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content transition hover:opacity-90"
-              >
-                Go
-              </button>
             </form>
           </div>
 

@@ -43,10 +43,10 @@ defmodule Receipts.LoL.Queue do
   # {type, label, included_by_default?}
   @ui_queues [
     {"ranked_solo", "Ranked Solo/Duo", true},
-    {"ranked_flex", "Ranked Flex", true},
-    {"normal_draft", "Normal Draft", true},
-    {"normal_blind", "Normal Blind", true},
-    {"clash", "Clash", true},
+    {"ranked_flex", "Ranked Flex", false},
+    {"normal_draft", "Normal Draft", false},
+    {"normal_blind", "Normal Blind", false},
+    {"clash", "Clash", false},
     {"aram", "ARAM", false},
     {"urf", "URF", false},
     {"arena", "Arena", false},
