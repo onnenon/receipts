@@ -106,6 +106,24 @@ defmodule Receipts.Workers.SyncAccountTest do
     assert RiotClientStub.match_id_calls() == []
   end
 
+  test "records sync completion separately from the newest match cursor", %{account: account} do
+    checkpoint = DateTime.add(DateTime.utc_now(), -6, :day)
+    account = update_account!(account, %{newest_synced_at: checkpoint})
+
+    RiotClientStub.put_match_ids(fn _puuid, _routing, _opts -> {:ok, []} end)
+
+    before_sync = DateTime.utc_now()
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    after_sync = DateTime.utc_now()
+    account = Ash.get!(Account, account.id)
+
+    assert DateTime.compare(account.newest_synced_at, checkpoint) == :eq
+    assert DateTime.compare(account.last_synced_at, before_sync) in [:eq, :gt]
+    assert DateTime.compare(account.last_synced_at, after_sync) in [:eq, :lt]
+  end
+
   test "missing participant fetch errors do not advance the backward cursor", %{account: account} do
     checkpoint = ~U[2026-05-10 12:00:00Z]
     account = update_account!(account, %{newest_synced_at: checkpoint, oldest_synced_start: 0})

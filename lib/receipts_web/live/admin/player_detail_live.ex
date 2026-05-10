@@ -308,7 +308,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                     </span>
                   </p>
                   <p class="mt-0.5 text-sm text-base-content/50">
-                    {format_synced_at(account.newest_synced_at)}
+                    {format_synced_at(account.last_synced_at)}
                     · History:
                     {if account.history_fully_synced,
                       do: "complete ✓",

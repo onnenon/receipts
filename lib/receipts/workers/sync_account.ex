@@ -31,6 +31,7 @@ defmodule Receipts.Workers.SyncAccount do
         {:ok, account} ->
           case backward_pass(account, champion_map, tag) do
             :ok ->
+              mark_sync_complete(account)
               Logger.info("[SyncAccount] Sync complete for #{tag}")
               :ok
 
@@ -42,6 +43,12 @@ defmodule Receipts.Workers.SyncAccount do
           error
       end
     end
+  end
+
+  defp mark_sync_complete(account) do
+    account
+    |> Ash.Changeset.for_update(:update, %{last_synced_at: DateTime.utc_now()})
+    |> Ash.update!()
   end
 
   # --- Forward pass: fetch ALL matches newer than newest_synced_at ---

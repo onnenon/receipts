@@ -40,6 +40,10 @@ defmodule Receipts.LoL.Account do
       public?(true)
     end
 
+    attribute :last_synced_at, :utc_datetime_usec do
+      public?(true)
+    end
+
     # Legacy pagination count, retained for display/migration compatibility.
     attribute :oldest_synced_start, :integer do
       default(0)
@@ -95,6 +99,7 @@ defmodule Receipts.LoL.Account do
         :riot_game_name,
         :riot_tag_line,
         :newest_synced_at,
+        :last_synced_at,
         :oldest_synced_start,
         :oldest_synced_at,
         :history_fully_synced

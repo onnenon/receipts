@@ -12,7 +12,7 @@ defmodule Receipts.Workers.SweepAccounts do
 
     accounts =
       Receipts.LoL.Account
-      |> Ash.Query.filter(is_nil(newest_synced_at) or newest_synced_at < ^stale_cutoff)
+      |> Ash.Query.filter(is_nil(last_synced_at) or last_synced_at < ^stale_cutoff)
       |> Ash.read!()
 
     if accounts == [] do
