@@ -4,7 +4,7 @@ defmodule Receipts.Workers.SyncAccount do
   require Logger
 
   # One backward page per job run; forward pass grabs up to 100 new matches.
-  @backward_page_size 20
+  @backward_page_size 100
   @forward_page_size 100
 
   @impl Oban.Worker
@@ -45,7 +45,10 @@ defmodule Receipts.Workers.SyncAccount do
             |> Ash.Changeset.for_update(:update, %{newest_synced_at: DateTime.utc_now()})
             |> Ash.update!()
 
-            Logger.info("[SyncAccount] Forward pass complete, newest_synced_at updated for #{tag}")
+            Logger.info(
+              "[SyncAccount] Forward pass complete, newest_synced_at updated for #{tag}"
+            )
+
             :ok
 
           {:snooze, _} = snooze ->
@@ -93,7 +96,9 @@ defmodule Receipts.Workers.SyncAccount do
         :ok
 
       {:ok, match_ids} ->
-        Logger.info("[SyncAccount] Backward pass: #{length(match_ids)} match(es) to process for #{tag}")
+        Logger.info(
+          "[SyncAccount] Backward pass: #{length(match_ids)} match(es) to process for #{tag}"
+        )
 
         case process_match_ids(match_ids, account, champion_map, tag) do
           :ok ->
@@ -107,7 +112,10 @@ defmodule Receipts.Workers.SyncAccount do
             })
             |> Ash.update!()
 
-            Logger.info("[SyncAccount] Backward pass done: offset #{new_start}, fully_synced=#{fully_synced} for #{tag}")
+            Logger.info(
+              "[SyncAccount] Backward pass done: offset #{new_start}, fully_synced=#{fully_synced} for #{tag}"
+            )
+
             :ok
 
           {:snooze, _} = snooze ->
@@ -195,7 +203,10 @@ defmodule Receipts.Workers.SyncAccount do
 
     case Map.get(champion_map, champion_riot_id) do
       nil ->
-        Logger.warning("[SyncAccount] Champion ID #{champion_riot_id} not in local map for #{match_id}, skipping participant")
+        Logger.warning(
+          "[SyncAccount] Champion ID #{champion_riot_id} not in local map for #{match_id}, skipping participant"
+        )
+
         :ok
 
       champion ->
@@ -222,7 +233,10 @@ defmodule Receipts.Workers.SyncAccount do
         })
         |> Ash.create!()
 
-        Logger.debug("[SyncAccount] Upserted #{match_id} (#{champion.name}) for #{account.riot_game_name}##{account.riot_tag_line}")
+        Logger.debug(
+          "[SyncAccount] Upserted #{match_id} (#{champion.name}) for #{account.riot_game_name}##{account.riot_tag_line}"
+        )
+
         :ok
     end
   end
