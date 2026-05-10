@@ -440,7 +440,9 @@ defmodule Receipts.Workers.SyncAccount do
           position: if(position == "", do: nil, else: position),
           team_id: participant["teamId"],
           items: items,
-          raw_participant: participant
+          raw_participant: participant,
+          game_datetime: game_datetime,
+          queue_type: Receipts.LoL.Queue.from_id(queue_id)
         })
         |> Ash.create!()
 

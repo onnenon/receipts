@@ -218,7 +218,7 @@ defmodule ReceiptsWeb.PlayerLive do
   defp rank_label(_), do: nil
 
   defp rank_icon_url(%{rank_tier: tier}) when not is_nil(tier) do
-    "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-shared-components/global/default/images/ranked-mini-crests/#{String.downcase(tier)}.png"
+    "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/ranked-emblem/emblem-#{String.downcase(tier)}.png"
   end
 
   defp rank_icon_url(_), do: nil

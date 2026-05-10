@@ -12,6 +12,8 @@ defmodule Receipts.LoL.MatchParticipant do
       index([:account_id, :champion_id])
       # "Playing with" join: find all participants in a match on a given team
       index([:match_id, :team_id])
+      # Recent-games query: latest N games for an account sorted by time
+      index([:account_id, :game_datetime])
     end
   end
 
@@ -27,6 +29,10 @@ defmodule Receipts.LoL.MatchParticipant do
     attribute(:vision_score, :integer, public?: true)
     attribute(:position, :string, public?: true)
     attribute(:team_id, :integer, public?: true)
+
+    # Denormalized from Match for filter/sort performance (no JOIN needed)
+    attribute(:game_datetime, :utc_datetime_usec, public?: true)
+    attribute(:queue_type, :string, public?: true)
 
     attribute :items, {:array, :integer} do
       default([])
@@ -97,7 +103,9 @@ defmodule Receipts.LoL.MatchParticipant do
         :position,
         :team_id,
         :items,
-        :raw_participant
+        :raw_participant,
+        :game_datetime,
+        :queue_type
       ])
 
       upsert?(true)
@@ -114,7 +122,9 @@ defmodule Receipts.LoL.MatchParticipant do
         :position,
         :team_id,
         :items,
-        :raw_participant
+        :raw_participant,
+        :game_datetime,
+        :queue_type
       ])
     end
   end

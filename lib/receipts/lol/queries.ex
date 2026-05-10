@@ -78,11 +78,7 @@ defmodule Receipts.LoL.Queries do
     from_year = Keyword.get(opts, :from_year)
     to_year = Keyword.get(opts, :to_year)
 
-    account_ids =
-      Account
-      |> Ash.Query.filter(player_id == ^player_id)
-      |> Ash.read!()
-      |> Enum.map(& &1.id)
+    account_ids = account_ids_for_player(player_id)
 
     participants =
       if account_ids == [] do
@@ -90,9 +86,10 @@ defmodule Receipts.LoL.Queries do
       else
         MatchParticipant
         |> Ash.Query.filter(account_id in ^account_ids)
-        |> Ash.Query.load([:champion, :match])
+        |> Ash.Query.filter(queue_type in ^queue_types)
+        |> apply_year_filters(from_year, to_year)
+        |> Ash.Query.load(:champion)
         |> Ash.read!()
-        |> Enum.filter(&match_included?(&1.match, queue_types, from_year, to_year))
       end
 
     avg = fn parts, field ->
@@ -141,36 +138,39 @@ defmodule Receipts.LoL.Queries do
     end)
   end
 
+  defp account_ids_for_player(player_id) do
+    Account
+    |> Ash.Query.filter(player_id == ^player_id)
+    |> Ash.read!()
+    |> Enum.map(& &1.id)
+  end
+
   defp aggregate_stats(player_id, champion, opts) do
     queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
     from_year = Keyword.get(opts, :from_year, nil)
     to_year = Keyword.get(opts, :to_year, nil)
 
-    account_ids =
-      Account
-      |> Ash.Query.filter(player_id == ^player_id)
-      |> Ash.read!()
-      |> Enum.map(& &1.id)
+    account_ids = account_ids_for_player(player_id)
 
-    participants =
+    # Load all participants for aggregate stats — no match JOIN needed.
+    all_participants =
       if account_ids == [] do
         []
       else
         MatchParticipant
         |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
-        |> Ash.Query.load(:match)
+        |> Ash.Query.filter(queue_type in ^queue_types)
+        |> apply_year_filters(from_year, to_year)
         |> Ash.read!()
-        |> Enum.filter(&match_included?(&1.match, queue_types, from_year, to_year))
-        |> Enum.sort_by(& &1.match.game_datetime, {:desc, DateTime})
       end
 
-    games_played = length(participants)
-    wins = Enum.count(participants, & &1.win)
+    games_played = length(all_participants)
+    wins = Enum.count(all_participants, & &1.win)
     win_rate = if games_played > 0, do: Float.round(wins / games_played * 100, 1), else: 0.0
 
     avg = fn field ->
       if games_played > 0 do
-        total = Enum.sum(Enum.map(participants, &(Map.get(&1, field) || 0)))
+        total = Enum.sum(Enum.map(all_participants, &(Map.get(&1, field) || 0)))
         Float.round(total / games_played, 1)
       else
         0.0
@@ -187,6 +187,21 @@ defmodule Receipts.LoL.Queries do
         do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
         else: Float.round(avg_kills + avg_assists, 2)
 
+    # Separate query for recent games: sorted in SQL, only 5 rows, match loaded.
+    recent_games =
+      if account_ids == [] do
+        []
+      else
+        MatchParticipant
+        |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
+        |> Ash.Query.filter(queue_type in ^queue_types)
+        |> apply_year_filters(from_year, to_year)
+        |> Ash.Query.sort(game_datetime: :desc)
+        |> Ash.Query.limit(5)
+        |> Ash.Query.load(:match)
+        |> Ash.read!()
+      end
+
     %{
       champion: champion,
       games_played: games_played,
@@ -197,18 +212,27 @@ defmodule Receipts.LoL.Queries do
       avg_assists: avg_assists,
       kda_ratio: kda_ratio,
       avg_cs: avg_cs,
-      recent_games: Enum.take(participants, 5)
+      recent_games: recent_games
     }
   end
 
-  defp match_included?(match, queue_types, from_year, to_year) do
-    queue_ok = match.queue_type in queue_types
-    year = match.game_datetime.year
-
-    date_ok =
-      (is_nil(from_year) or year >= from_year) and
-        (is_nil(to_year) or year <= to_year)
-
-    queue_ok and date_ok
+  defp apply_year_filters(query, from_year, to_year) do
+    query
+    |> then(fn q ->
+      if from_year do
+        from_dt = DateTime.new!(Date.new!(from_year, 1, 1), ~T[00:00:00], "Etc/UTC")
+        Ash.Query.filter(q, game_datetime >= ^from_dt)
+      else
+        q
+      end
+    end)
+    |> then(fn q ->
+      if to_year do
+        to_dt = DateTime.new!(Date.new!(to_year + 1, 1, 1), ~T[00:00:00], "Etc/UTC")
+        Ash.Query.filter(q, game_datetime < ^to_dt)
+      else
+        q
+      end
+    end)
   end
 end
