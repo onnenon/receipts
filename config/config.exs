@@ -19,7 +19,9 @@ config :receipts, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        # Daily at 4am UTC — champion data changes roughly every two weeks
-       {"0 4 * * *", Receipts.Workers.SyncDataDragon}
+       {"0 4 * * *", Receipts.Workers.SyncDataDragon},
+       # Hourly — enqueue SyncAccount for any account not synced in the last 30 minutes
+       {"0 * * * *", Receipts.Workers.SweepAccounts}
      ]}
   ],
   queues: [default: 10, sync: 5, data_dragon: 2]

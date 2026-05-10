@@ -71,7 +71,14 @@ defmodule Receipts.LoL.Account do
     defaults([
       :read,
       :destroy,
-      create: [:riot_puuid, :riot_game_name, :riot_tag_line, :riot_region, :riot_routing],
+      create: [
+        :riot_puuid,
+        :riot_game_name,
+        :riot_tag_line,
+        :riot_region,
+        :riot_routing,
+        :player_id
+      ],
       update: [
         :riot_game_name,
         :riot_tag_line,

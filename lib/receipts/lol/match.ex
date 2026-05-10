@@ -52,5 +52,13 @@ defmodule Receipts.LoL.Match do
       create: [:riot_match_id, :game_datetime, :game_duration_seconds, :queue_id, :raw_info],
       update: []
     ])
+
+    create :sync do
+      accept([:riot_match_id, :game_datetime, :game_duration_seconds, :queue_id, :raw_info])
+      upsert?(true)
+      upsert_identity(:unique_match_id)
+      # Update queue/raw on conflict so RETURNING * gives back the existing row's id
+      upsert_fields([:queue_id, :raw_info])
+    end
   end
 end

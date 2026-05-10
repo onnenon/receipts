@@ -72,5 +72,40 @@ defmodule Receipts.LoL.MatchParticipant do
       ],
       update: []
     ])
+
+    create :sync do
+      # FK attributes from belongs_to are settable directly
+      accept([
+        :match_id,
+        :account_id,
+        :champion_id,
+        :kills,
+        :deaths,
+        :assists,
+        :win,
+        :cs,
+        :damage_dealt,
+        :vision_score,
+        :position,
+        :items,
+        :raw_participant
+      ])
+
+      upsert?(true)
+      upsert_identity(:unique_account_match)
+
+      upsert_fields([
+        :kills,
+        :deaths,
+        :assists,
+        :win,
+        :cs,
+        :damage_dealt,
+        :vision_score,
+        :position,
+        :items,
+        :raw_participant
+      ])
+    end
   end
 end
