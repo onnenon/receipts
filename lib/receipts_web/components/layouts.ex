@@ -51,14 +51,14 @@ defmodule ReceiptsWeb.Layouts do
         </a>
         <nav class="flex items-center gap-2 overflow-x-auto">
           <.link
-            navigate={~p"/players"}
+            href={~p"/players"}
             class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
           >
             Receipts
           </.link>
           <.link
             :if={@admin_authenticated}
-            navigate={~p"/admin/players"}
+            href={~p"/admin/players"}
             class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
           >
             Admin

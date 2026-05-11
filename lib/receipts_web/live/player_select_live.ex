@@ -112,7 +112,7 @@ defmodule ReceiptsWeb.PlayerSelectLive do
             <.icon name="hero-user-group" class="mx-auto h-12 w-12 mb-3" />
             <p class="text-sm">No players registered yet.</p>
             <.link
-              navigate={~p"/admin/players"}
+              href={~p"/admin/players"}
               class="mt-2 inline-block text-sm text-primary hover:underline"
             >
               Add players

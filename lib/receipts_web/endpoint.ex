@@ -44,7 +44,11 @@ defmodule ReceiptsWeb.Endpoint do
   )
 
   plug(Plug.RequestId)
-  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
+
+  plug(Plug.Telemetry,
+    event_prefix: [:phoenix, :endpoint],
+    log: {__MODULE__, :log_level, []}
+  )
 
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
@@ -56,4 +60,10 @@ defmodule ReceiptsWeb.Endpoint do
   plug(Plug.Head)
   plug(Plug.Session, @session_options)
   plug(ReceiptsWeb.Router)
+
+  def log_level(%{path_info: ["metrics"]}), do: false
+  def log_level(%{status: nil}), do: false
+  def log_level(%{status: status}) when status >= 500, do: :error
+  def log_level(%{status: status}) when status >= 400, do: :warning
+  def log_level(_conn), do: false
 end

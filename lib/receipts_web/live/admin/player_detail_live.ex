@@ -328,7 +328,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                   <.icon name="hero-pencil-mini" class="h-4 w-4" /> Edit
                 </button>
                 <.link
-                  navigate={~p"/players/#{@player.id}"}
+                  href={~p"/players/#{@player.id}"}
                   class="inline-flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium transition hover:bg-base-300/60"
                 >
                   View Receipts

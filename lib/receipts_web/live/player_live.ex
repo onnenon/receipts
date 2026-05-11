@@ -1137,7 +1137,7 @@ defmodule ReceiptsWeb.PlayerLive do
           <div class="relative flex items-start gap-4 p-5">
             <%!-- Back button --%>
             <.link
-              navigate={~p"/"}
+              href={~p"/"}
               class="mt-1 rounded-lg p-1.5 text-base-content/50 transition hover:bg-base-300 hover:text-base-content"
             >
               <.icon name="hero-arrow-left" class="h-5 w-5" />
