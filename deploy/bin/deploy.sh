@@ -39,4 +39,8 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build web migrate
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm migrate
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d web cloudflared loki promtail postgres_exporter prometheus grafana
+
+# Restart services that volume-mount config files so they pick up any changes
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" restart prometheus grafana
+
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
