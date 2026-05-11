@@ -204,7 +204,7 @@ defmodule ReceiptsWeb.PlayerLive do
   defp rank_label(_), do: nil
 
   defp rank_icon_url(%{rank_tier: tier}) when not is_nil(tier) do
-    "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/ranked-emblem/emblem-#{String.downcase(tier)}.png"
+    "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/ranked-mini-crests/#{String.downcase(tier)}.png"
   end
 
   defp rank_icon_url(_), do: nil
@@ -273,6 +273,29 @@ defmodule ReceiptsWeb.PlayerLive do
   defp win_rate_bg(rate) when rate < 45.0, do: "bg-error/15 text-error border-error/30"
   defp win_rate_bg(_), do: "bg-base-300/50 text-base-content/70 border-base-300"
 
+  defp rank_tier_glow(%{rank_tier: "CHALLENGER"}), do: "bg-yellow-300"
+  defp rank_tier_glow(%{rank_tier: "GRANDMASTER"}), do: "bg-red-500"
+  defp rank_tier_glow(%{rank_tier: "MASTER"}), do: "bg-purple-500"
+  defp rank_tier_glow(%{rank_tier: "DIAMOND"}), do: "bg-blue-400"
+  defp rank_tier_glow(%{rank_tier: "EMERALD"}), do: "bg-emerald-400"
+  defp rank_tier_glow(%{rank_tier: "PLATINUM"}), do: "bg-cyan-400"
+  defp rank_tier_glow(%{rank_tier: "GOLD"}), do: "bg-yellow-500"
+  defp rank_tier_glow(%{rank_tier: "SILVER"}), do: "bg-slate-400"
+  defp rank_tier_glow(%{rank_tier: "BRONZE"}), do: "bg-amber-700"
+  defp rank_tier_glow(_), do: "bg-zinc-500"
+
+  defp rank_tier_badge(%{rank_tier: "CHALLENGER"}), do: "border-yellow-400/30 bg-yellow-400/10 text-yellow-300"
+  defp rank_tier_badge(%{rank_tier: "GRANDMASTER"}), do: "border-red-400/30 bg-red-400/10 text-red-300"
+  defp rank_tier_badge(%{rank_tier: "MASTER"}), do: "border-purple-400/30 bg-purple-400/10 text-purple-300"
+  defp rank_tier_badge(%{rank_tier: "DIAMOND"}), do: "border-blue-400/30 bg-blue-400/10 text-blue-300"
+  defp rank_tier_badge(%{rank_tier: "EMERALD"}), do: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+  defp rank_tier_badge(%{rank_tier: "PLATINUM"}), do: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+  defp rank_tier_badge(%{rank_tier: "GOLD"}), do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
+  defp rank_tier_badge(%{rank_tier: "SILVER"}), do: "border-slate-400/30 bg-slate-400/10 text-slate-300"
+  defp rank_tier_badge(%{rank_tier: "BRONZE"}), do: "border-amber-700/30 bg-amber-700/10 text-amber-500"
+  defp rank_tier_badge(%{rank_tier: "IRON"}), do: "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
+  defp rank_tier_badge(_), do: "border-base-300 bg-base-300/50 text-base-content/70"
+
   defp format_duration(nil), do: "—"
 
   defp format_duration(seconds) do
@@ -314,54 +337,74 @@ defmodule ReceiptsWeb.PlayerLive do
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
         <%!-- Header --%>
-        <div class="flex items-start gap-3">
-          <.link
-            navigate={~p"/"}
-            class="mt-1 rounded-lg p-1.5 text-base-content/50 transition hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-arrow-left" class="h-5 w-5" />
-          </.link>
-          <% best = best_rank(@player.accounts) %>
-          <div class="min-w-0 flex-1">
-            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Receipts</p>
-            <div class="flex flex-wrap items-center gap-3">
-              <h1 class="text-3xl font-bold tracking-tight">{@player.name}</h1>
-              <%= if best do %>
-                <div class="flex items-center gap-1.5 rounded-lg border border-base-300 bg-base-200 px-2.5 py-1">
-                  <img
-                    src={rank_icon_url(best)}
-                    alt={rank_label(best)}
-                    class="h-5 w-5 object-contain"
-                    onerror="this.style.display='none'"
-                  />
-                  <span class="text-sm font-semibold">{rank_label(best)}</span>
-                  <span class="text-xs text-base-content/40">{best.rank_lp} LP</span>
-                </div>
-              <% end %>
+        <% best = best_rank(@player.accounts) %>
+        <div class="relative overflow-hidden rounded-2xl border border-base-300 bg-base-200">
+          <%!-- Rank tier glow --%>
+          <%= if best do %>
+            <div class={[
+              "pointer-events-none absolute -right-12 -top-12 h-64 w-64 rounded-full blur-3xl opacity-15",
+              rank_tier_glow(best)
+            ]}>
             </div>
-            <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <%= if @total_games > 0 do %>
-                <span class="text-sm text-base-content/55">{@total_games} games tracked</span>
-                <span class={["text-sm font-semibold", win_rate_color(@overall_wr)]}>
-                  {@overall_wr}% overall WR
-                </span>
-                <%= if @player.oldest_game_date do %>
-                  <span class="text-sm text-base-content/40">
-                    since {Calendar.strftime(@player.oldest_game_date, "%b %Y")}
-                  </span>
+          <% end %>
+          <div class="relative flex items-start gap-4 p-5">
+            <%!-- Back button --%>
+            <.link
+              navigate={~p"/"}
+              class="mt-1 rounded-lg p-1.5 text-base-content/50 transition hover:bg-base-300 hover:text-base-content"
+            >
+              <.icon name="hero-arrow-left" class="h-5 w-5" />
+            </.link>
+            <%!-- Player info --%>
+            <div class="min-w-0 flex-1">
+              <p class="text-xs font-semibold uppercase tracking-widest text-primary">Receipts</p>
+              <div class="mt-0.5 flex flex-wrap items-center gap-3">
+                <h1 class="text-3xl font-bold tracking-tight">{@player.name}</h1>
+                <%= if best do %>
+                  <div class={[
+                    "flex items-center gap-2 rounded-xl border px-3 py-1.5",
+                    rank_tier_badge(best)
+                  ]}>
+                    <img
+                      src={rank_icon_url(best)}
+                      alt={rank_label(best)}
+                      class="h-8 w-8 object-contain"
+                      onerror="this.style.display='none'"
+                    />
+                    <span class="text-sm font-bold">{rank_label(best)}</span>
+                    <span class="text-xs opacity-60">{best.rank_lp} LP</span>
+                  </div>
                 <% end %>
-              <% end %>
-              <%= for account <- @player.accounts do %>
-                <a
-                  href={opgg_url(account)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1 rounded-md border border-base-300 bg-base-200 px-2 py-0.5 text-xs font-medium text-base-content/60 transition hover:border-base-content/30 hover:text-base-content"
-                >
-                  {account.riot_game_name}#{account.riot_tag_line}
-                  <.icon name="hero-arrow-top-right-on-square-mini" class="h-3 w-3" />
-                </a>
-              <% end %>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <%= if @total_games > 0 do %>
+                  <span class="inline-flex items-center rounded-lg border border-base-300 bg-base-300/40 px-2.5 py-1 text-xs font-medium text-base-content/60">
+                    {@total_games} games tracked
+                  </span>
+                  <span class={[
+                    "inline-flex items-center rounded-lg border px-2.5 py-1 text-xs font-bold",
+                    win_rate_bg(@overall_wr)
+                  ]}>
+                    {@overall_wr}% WR
+                  </span>
+                  <%= if @player.oldest_game_date do %>
+                    <span class="inline-flex items-center rounded-lg border border-base-300 bg-base-300/30 px-2.5 py-1 text-xs text-base-content/45">
+                      since {Calendar.strftime(@player.oldest_game_date, "%b %Y")}
+                    </span>
+                  <% end %>
+                <% end %>
+                <%= for account <- @player.accounts do %>
+                  <a
+                    href={opgg_url(account)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex items-center gap-1 rounded-lg border border-base-300 bg-base-200 px-2.5 py-1 text-xs font-medium text-base-content/55 transition hover:border-primary/40 hover:text-primary"
+                  >
+                    {account.riot_game_name}#{account.riot_tag_line}
+                    <.icon name="hero-arrow-top-right-on-square-mini" class="h-3 w-3" />
+                  </a>
+                <% end %>
+              </div>
             </div>
           </div>
         </div>
