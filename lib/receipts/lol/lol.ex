@@ -8,5 +8,6 @@ defmodule Receipts.LoL do
     resource(Receipts.LoL.Match)
     resource(Receipts.LoL.MatchParticipant)
     resource(Receipts.LoL.CompSuggestionCache)
+    resource(Receipts.LoL.WinLossAnalysisCache)
   end
 end

@@ -4,7 +4,17 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
   require Ash.Query
 
   alias Receipts.AI.CompSuggestion, as: CompSuggestionService
-  alias Receipts.LoL.{Account, Champion, CompSuggestionCache, Match, MatchParticipant, Player}
+  alias Receipts.AI.WinLossAnalysis, as: WinLossAnalysisService
+
+  alias Receipts.LoL.{
+    Account,
+    Champion,
+    CompSuggestionCache,
+    Match,
+    MatchParticipant,
+    Player,
+    WinLossAnalysisCache
+  }
 
   test "selects multiple players before navigating to receipts", %{conn: conn} do
     player_a = create_player("Koozie")
@@ -156,6 +166,130 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     assert comp_suggestion_count(player_ids) == 2
   end
 
+  test "win loss analysis button is admin only", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+
+    player_ids = "#{player_a.id},#{player_b.id}"
+
+    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+    refute has_element?(view, "#analyze-win-loss-button")
+
+    admin_conn = log_in_admin(conn)
+    {:ok, admin_view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
+    assert has_element?(admin_view, "#analyze-win-loss-button")
+    assert has_element?(admin_view, "#analyze-win-loss-button", "Analyze Games")
+    assert has_element?(admin_view, "#toggle-win-loss-analysis")
+
+    html = admin_view |> element("#analyze-win-loss-button") |> render_click()
+    assert html =~ "Analyzing..."
+    assert has_element?(admin_view, "#analyze-win-loss-button[disabled]")
+    assert has_element?(admin_view, "#win-loss-analysis-loading")
+
+    render_async(admin_view)
+
+    assert has_element?(admin_view, "#win-loss-analysis-result", "low damage mid games")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "Mid pressure falls off")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "Koozie")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "carrying hard")
+    refute has_element?(admin_view, "#win-loss-analysis-result", "snake_case")
+  end
+
+  test "AI sections can be collapsed independently", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+
+    admin_conn = log_in_admin(conn)
+    player_ids = "#{player_a.id},#{player_b.id}"
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
+
+    assert has_element?(view, "#suggest-comp-button")
+    assert has_element?(view, "#analyze-win-loss-button")
+
+    view |> element("#toggle-comp-suggestion") |> render_click()
+
+    refute has_element?(view, "#suggest-comp-button")
+    assert has_element?(view, "#toggle-comp-suggestion")
+    assert has_element?(view, "#analyze-win-loss-button")
+
+    view |> element("#toggle-win-loss-analysis") |> render_click()
+
+    refute has_element?(view, "#analyze-win-loss-button")
+    assert has_element?(view, "#toggle-win-loss-analysis")
+
+    view |> element("#toggle-comp-suggestion") |> render_click()
+    assert has_element?(view, "#suggest-comp-button")
+  end
+
+  test "admin comparison page loads a fresh cached win loss analysis", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    create_win_loss_analysis(player_ids, DateTime.utc_now(), "Cached loss read is still fresh.")
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    assert has_element?(view, "#win-loss-analysis-cache-date", "Cached analysis generated")
+    assert has_element?(view, "#win-loss-analysis-result", "Cached loss read is still fresh.")
+    assert has_element?(view, "#analyze-win-loss-button", "Analyze Again")
+  end
+
+  test "older win loss analyses remain viewable from history", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    stored =
+      create_win_loss_analysis(
+        player_ids,
+        DateTime.add(DateTime.utc_now(), -2, :day),
+        "Old loss analysis can still be inspected."
+      )
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    refute has_element?(view, "#win-loss-analysis-result")
+    assert has_element?(view, "#toggle-win-loss-analysis-history", "History")
+
+    view
+    |> element("#toggle-win-loss-analysis-history")
+    |> render_click()
+
+    assert has_element?(view, "#win-loss-analysis-history")
+
+    view
+    |> element("#view-win-loss-analysis-#{stored.id}")
+    |> render_click()
+
+    assert has_element?(
+             view,
+             "#win-loss-analysis-result",
+             "Old loss analysis can still be inspected."
+           )
+
+    refute has_element?(view, "#win-loss-analysis-cache-date")
+  end
+
+  test "generating again stores another win loss analysis record", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    create_win_loss_analysis(player_ids, DateTime.utc_now(), "Cached loss read is still fresh.")
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    view |> element("#analyze-win-loss-button") |> render_click()
+    render_async(view)
+
+    assert has_element?(view, "#win-loss-analysis-result", "low damage mid games")
+    assert win_loss_analysis_count(player_ids) == 2
+  end
+
   defp create_player(name) do
     Player
     |> Ash.Changeset.for_create(:create, %{name: name, discord_id: unique_id()})
@@ -243,6 +377,35 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     cache_key = CompSuggestionService.cache_key(player_ids)
 
     CompSuggestionCache
+    |> Ash.Query.filter(cache_key == ^cache_key)
+    |> Ash.read!()
+    |> length()
+  end
+
+  defp create_win_loss_analysis(player_ids, generated_at, summary) do
+    WinLossAnalysisCache
+    |> Ash.Changeset.for_create(:create, %{
+      cache_key: WinLossAnalysisService.cache_key(player_ids),
+      player_ids: player_ids,
+      filters: WinLossAnalysisService.cache_filters(),
+      generated_at: generated_at,
+      analysis: %{
+        "summary" => summary,
+        "confidence" => "medium",
+        "loss_causes" => [],
+        "player_readouts" => [],
+        "carry_highlights" => [],
+        "recommendations" => [],
+        "caveats" => []
+      }
+    })
+    |> Ash.create!()
+  end
+
+  defp win_loss_analysis_count(player_ids) do
+    cache_key = WinLossAnalysisService.cache_key(player_ids)
+
+    WinLossAnalysisCache
     |> Ash.Query.filter(cache_key == ^cache_key)
     |> Ash.read!()
     |> length()

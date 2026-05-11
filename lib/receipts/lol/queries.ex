@@ -366,7 +366,7 @@ defmodule Receipts.LoL.Queries do
       kda_ratio =
         if avg_deaths > 0,
           do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
-          else: Float.round(avg_kills + avg_assists, 2)
+          else: Float.round((avg_kills + avg_assists) / 1.0, 2)
 
       %{
         champion: champion,
@@ -439,7 +439,7 @@ defmodule Receipts.LoL.Queries do
       kda_ratio =
         if avg_deaths > 0,
           do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
-          else: Float.round(avg_kills + avg_assists, 2)
+          else: Float.round((avg_kills + avg_assists) / 1.0, 2)
 
       %{
         champion: champion,
@@ -571,6 +571,145 @@ defmodule Receipts.LoL.Queries do
     end
   end
 
+  def win_loss_analysis_context_for_players(player_ids, opts \\ []) do
+    player_ids = normalize_ids(player_ids)
+
+    cond do
+      length(player_ids) < 2 ->
+        {:error, :not_enough_players}
+
+      true ->
+        queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+        from_year = Keyword.get(opts, :from_year)
+        to_year = Keyword.get(opts, :to_year)
+        recent_match_limit = Keyword.get(opts, :recent_match_limit, 20)
+        recent_player_game_limit = Keyword.get(opts, :recent_player_game_limit, 20)
+
+        players = load_players_in_order(player_ids)
+
+        if length(players) < 2 do
+          {:error, :not_enough_players}
+        else
+          loaded_player_ids = Enum.map(players, & &1.id)
+
+          shared_match_ids =
+            Keyword.get_lazy(opts, :match_ids, fn ->
+              common_match_ids_for_players(loaded_player_ids,
+                queue_types: queue_types,
+                from_year: from_year,
+                to_year: to_year
+              )
+            end)
+
+          player_participants =
+            Map.new(players, fn player ->
+              participants =
+                player_participants(player.id,
+                  queue_types: queue_types,
+                  from_year: from_year,
+                  to_year: to_year,
+                  match_ids: shared_match_ids,
+                  load: [:champion, :match]
+                )
+
+              {player.id, participants}
+            end)
+
+          recent_shared_matches =
+            player_participants
+            |> Map.values()
+            |> List.flatten()
+            |> Enum.group_by(& &1.match_id)
+            |> Enum.map(fn {_match_id, participants} ->
+              match = participants |> List.first() |> Map.get(:match)
+
+              %{
+                match_id: match.id,
+                riot_match_id: match.riot_match_id,
+                played_at: match.game_datetime,
+                queue_type: match.queue_type,
+                duration_seconds: match.game_duration_seconds,
+                group_win?: participants |> List.first() |> Map.get(:win),
+                participants:
+                  participants
+                  |> Enum.map(fn participant ->
+                    player = player_for_account(players, participant.account_id)
+                    participant_context(participant, player)
+                  end)
+                  |> Enum.sort_by(& &1.player_name)
+              }
+            end)
+            |> Enum.sort_by(& &1.played_at, {:desc, DateTime})
+            |> Enum.take(recent_match_limit)
+
+          player_contexts =
+            Enum.map(players, fn player ->
+              shared_participants = Map.get(player_participants, player.id, [])
+
+              recent_individual =
+                player_recent_context_participants(player.id,
+                  queue_types: queue_types,
+                  from_year: from_year,
+                  to_year: to_year,
+                  exclude_match_ids: [],
+                  limit: recent_player_game_limit
+                )
+
+              loss_participants = Enum.reject(shared_participants, & &1.win)
+
+              %{
+                id: player.id,
+                name: player.name,
+                accounts: Enum.map(player.accounts, &account_context/1),
+                shared_summary: performance_summary(shared_participants),
+                shared_loss_summary: performance_summary(loss_participants),
+                shared_positions: summarize_positions(shared_participants),
+                recent_individual_summary: performance_summary(recent_individual),
+                recent_individual_positions: summarize_positions(recent_individual),
+                recent_shared_games:
+                  shared_participants
+                  |> Enum.sort_by(& &1.game_datetime, {:desc, DateTime})
+                  |> Enum.take(recent_match_limit)
+                  |> Enum.map(&participant_context(&1, player)),
+                recent_individual_games:
+                  recent_individual
+                  |> Enum.map(&participant_context(&1, player))
+              }
+            end)
+
+          {:ok,
+           %{
+             filters: %{
+               queues: queue_types,
+               from_year: from_year,
+               to_year: to_year,
+               recent_match_limit: recent_match_limit,
+               recent_player_game_limit: recent_player_game_limit
+             },
+             selected_players: Enum.map(players, &%{id: &1.id, name: &1.name}),
+             shared_games: %{
+               count: length(shared_match_ids || []),
+               group:
+                 group_stats_for_players(loaded_player_ids,
+                   queue_types: queue_types,
+                   from_year: from_year,
+                   to_year: to_year,
+                   match_ids: shared_match_ids
+                 ),
+               recent: recent_shared_matches
+             },
+             players: player_contexts,
+             notes: [
+               "recent shared games are games containing every selected player and matching the active filters",
+               "shared_loss_summary only includes shared games the selected group lost",
+               "recent_individual_* stats include each player's current form across all matching games",
+               "Do not treat small samples as conclusive."
+             ]
+           }}
+        end
+    end
+  end
+
   defp load_players_in_order(player_ids) do
     players =
       Player
@@ -594,6 +733,57 @@ defmodule Receipts.LoL.Queries do
       rank_lp: account.rank_lp
     }
   end
+
+  defp player_for_account(players, account_id) do
+    Enum.find(players, fn player ->
+      Enum.any?(player.accounts, &(&1.id == account_id))
+    end)
+  end
+
+  defp performance_summary(participants) do
+    games = length(participants)
+    wins = Enum.count(participants, & &1.win)
+
+    %{
+      games: games,
+      wins: wins,
+      losses: games - wins,
+      win_rate: percentage(wins, games),
+      avg_kills: avg(participants, :kills),
+      avg_deaths: avg(participants, :deaths),
+      avg_assists: avg(participants, :assists),
+      avg_kda_ratio: kda_ratio(participants),
+      avg_cs: avg(participants, :cs),
+      avg_damage_dealt: avg(participants, :damage_dealt),
+      avg_vision_score: avg(participants, :vision_score)
+    }
+  end
+
+  defp participant_context(participant, player) do
+    %{
+      player_id: if(player, do: player.id, else: nil),
+      player_name: if(player, do: player.name, else: "Unknown"),
+      champion: participant.champion && participant.champion.name,
+      position: participant.position,
+      position_label: position_label(participant.position),
+      win?: participant.win,
+      kills: participant.kills || 0,
+      deaths: participant.deaths || 0,
+      assists: participant.assists || 0,
+      kda_ratio: participant_kda_ratio(participant),
+      cs: participant.cs || 0,
+      damage_dealt: participant.damage_dealt || 0,
+      vision_score: participant.vision_score || 0,
+      queue_type: participant.queue_type,
+      played_at: participant.game_datetime,
+      duration_seconds: participant_match_duration(participant)
+    }
+  end
+
+  defp participant_match_duration(%{match: %Receipts.LoL.Match{} = match}),
+    do: match.game_duration_seconds
+
+  defp participant_match_duration(_participant), do: nil
 
   defp player_participants(player_id, opts) do
     queue_types = Keyword.fetch!(opts, :queue_types)
@@ -707,6 +897,28 @@ defmodule Receipts.LoL.Queries do
       else: 0.0
   end
 
+  defp kda_ratio([]), do: 0.0
+
+  defp kda_ratio(parts) do
+    kills = avg(parts, :kills)
+    deaths = avg(parts, :deaths)
+    assists = avg(parts, :assists)
+
+    if deaths > 0,
+      do: Float.round((kills + assists) / deaths, 2),
+      else: Float.round((kills + assists) / 1.0, 2)
+  end
+
+  defp participant_kda_ratio(participant) do
+    kills = participant.kills || 0
+    deaths = participant.deaths || 0
+    assists = participant.assists || 0
+
+    if deaths > 0,
+      do: Float.round((kills + assists) / deaths, 2),
+      else: Float.round((kills + assists) / 1.0, 2)
+  end
+
   defp percentage(_wins, 0), do: 0.0
   defp percentage(wins, games), do: Float.round(wins / games * 100, 1)
 
@@ -785,7 +997,7 @@ defmodule Receipts.LoL.Queries do
     kda_ratio =
       if avg_deaths > 0,
         do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
-        else: Float.round(avg_kills + avg_assists, 2)
+        else: Float.round((avg_kills + avg_assists) / 1.0, 2)
 
     position_stats =
       all_participants
