@@ -1,10 +1,10 @@
-defmodule Receipts.LoL.CompPromptLabRun do
+defmodule Receipts.LoL.WinLossPromptLabRun do
   use Ash.Resource,
     domain: Receipts.LoL,
     data_layer: AshPostgres.DataLayer
 
   postgres do
-    table("lol_comp_prompt_lab_runs")
+    table("lol_win_loss_prompt_lab_runs")
     repo(Receipts.Repo)
 
     custom_indexes do
@@ -59,7 +59,7 @@ defmodule Receipts.LoL.CompPromptLabRun do
       public?(true)
     end
 
-    attribute :suggestion, :map do
+    attribute :analysis, :map do
       allow_nil?(false)
       public?(true)
     end
@@ -90,7 +90,7 @@ defmodule Receipts.LoL.CompPromptLabRun do
         :context,
         :context_config,
         :temperature,
-        :suggestion,
+        :analysis,
         :generated_at
       ]
     ])

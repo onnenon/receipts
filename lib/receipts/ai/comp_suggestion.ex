@@ -8,7 +8,6 @@ defmodule Receipts.AI.CompSuggestion do
   @positions ~w(TOP JUNGLE MIDDLE BOTTOM UTILITY)
   @cache_ttl_seconds 86_400
   @default_temperature 0.25
-  @context_placeholder "{{context_json}}"
   @default_system_instruction """
   You are helping a private League of Legends friend group choose roles and champions.
   Use only the supplied JSON. Recommend one primary position per player.
@@ -29,73 +28,88 @@ defmodule Receipts.AI.CompSuggestion do
   If shared_top_champions or shared position champion samples are thin for a player, lean on
   recent_non_shared_top_champions and recent_non_shared_positions for that player's role and
   champion recommendations, while calling out the small shared sample in the evidence or caveats.
-
-  Context:
-  #{@context_placeholder}
   """
   @context_block_definitions [
     %{
       "key" => "shared_group_stats",
       "label" => "Shared group stats",
       "description" =>
-        "Adds total shared games and aggregate group performance for games containing every selected player."
+        "Adds total shared games and aggregate group performance for games containing every selected player.",
+      "schema" =>
+        "shared_games: {count, group: {games, wins, losses, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score}}"
     },
     %{
       "key" => "player_accounts",
       "label" => "Player accounts and rank",
       "description" =>
-        "Adds each player's Riot accounts, regions, and rank context so recommendations understand account coverage."
+        "Adds each player's Riot accounts, regions, and rank context so recommendations understand account coverage.",
+      "schema" => "account: {game_name, tag_line, region, rank_tier, rank_division, rank_lp}"
     },
     %{
       "key" => "player_game_counts",
       "label" => "Player game counts",
       "description" =>
-        "Adds all-game and shared-game counts for each player, useful for judging sample size."
+        "Adds all-game and shared-game counts for each player, useful for judging sample size.",
+      "schema" => "player counts: {all_games, shared_games}"
     },
     %{
       "key" => "shared_position_stats",
       "label" => "Shared position stats",
       "description" =>
-        "Adds per-player role performance from games this exact group played together."
+        "Adds per-player role performance from games this exact group played together.",
+      "schema" =>
+        "position summary: {position, label, games, wins, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score, top_champions}"
     },
     %{
       "key" => "recent_non_shared_position_stats",
       "label" => "Recent non-shared position stats",
       "description" =>
-        "Adds recent individual role performance outside the selected shared games, currently capped at 40 games per player."
+        "Adds recent individual role performance outside the selected shared games, currently capped at 40 games per player.",
+      "schema" =>
+        "position summary: {position, label, games, wins, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score, top_champions}"
     },
     %{
       "key" => "overall_position_stats",
       "label" => "Overall position stats",
-      "description" => "Adds all-time role performance within the active queue and year filters."
+      "description" => "Adds all-time role performance within the active queue and year filters.",
+      "schema" =>
+        "position summary: {position, label, games, wins, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score, top_champions}"
     },
     %{
       "key" => "shared_top_champions",
       "label" => "Shared top champions",
       "description" =>
-        "Adds each player's top champions from games this exact group played together."
+        "Adds each player's top champions from games this exact group played together.",
+      "schema" =>
+        "champion summary: {champion: {id, key, name}, games_played, wins, win_rate, avg_kills, avg_deaths, avg_assists, kda_ratio}"
     },
     %{
       "key" => "recent_non_shared_top_champions",
       "label" => "Recent non-shared top champions",
       "description" =>
-        "Adds each player's recent individual champion results outside the selected shared games."
+        "Adds each player's recent individual champion results outside the selected shared games.",
+      "schema" =>
+        "champion summary: {champion: {id, key, name}, games_played, wins, win_rate, avg_kills, avg_deaths, avg_assists, kda_ratio}"
     },
     %{
       "key" => "overall_top_champions",
       "label" => "Overall top champions",
-      "description" => "Adds each player's best champions across all matching games."
+      "description" => "Adds each player's best champions across all matching games.",
+      "schema" =>
+        "champion summary: {champion: {id, key, name}, games_played, wins, win_rate, avg_kills, avg_deaths, avg_assists, kda_ratio}"
     },
     %{
       "key" => "position_definitions",
       "label" => "Position definitions",
-      "description" => "Adds the legal League role keys and display labels the model may use."
+      "description" => "Adds the legal League role keys and display labels the model may use.",
+      "schema" => "position: {key, label}"
     },
     %{
       "key" => "interpretation_notes",
       "label" => "Interpretation notes",
       "description" =>
-        "Adds guardrails explaining shared-game context, recent form, and small sample handling."
+        "Adds guardrails explaining shared-game context, recent form, and small sample handling.",
+      "schema" => "note: string"
     }
   ]
 
@@ -117,23 +131,6 @@ defmodule Receipts.AI.CompSuggestion do
          context_blocks: default_context_block_keys(),
          temperature: @default_temperature
        }}
-    end
-  end
-
-  def trial_prompt(attrs) do
-    system_instruction = Map.get(attrs, "system_instruction", default_system_instruction())
-    prompt_template = Map.get(attrs, "prompt_template", default_prompt_template())
-    context_json = Map.get(attrs, "context_json", "")
-    temperature = parse_temperature(Map.get(attrs, "temperature", @default_temperature))
-
-    with {:ok, context} <- decode_context(context_json),
-         {:ok, response} <-
-           ai_client().generate_structured(
-             render_prompt_template(prompt_template, context_json),
-             response_schema(),
-             ai_opts(system_instruction: system_instruction, temperature: temperature)
-           ) do
-      {:ok, normalize_response(response, context)}
     end
   end
 
@@ -163,6 +160,16 @@ defmodule Receipts.AI.CompSuggestion do
              suggestion: suggestion
            }) do
       {:ok, prompt_lab_result(record)}
+    end
+  end
+
+  def rate_run(run_id, rating) when rating in 1..5 do
+    with {:ok, record} <- Ash.get(CompPromptLabRun, run_id),
+         {:ok, _} <-
+           record
+           |> Ash.Changeset.for_update(:update_quality, %{quality_rating: rating})
+           |> Ash.update() do
+      :ok
     end
   end
 
@@ -313,7 +320,8 @@ defmodule Receipts.AI.CompSuggestion do
       prompt_template: record.prompt_template,
       context: record.context,
       context_config: record.context_config,
-      temperature: record.temperature
+      temperature: record.temperature,
+      quality_rating: record.quality_rating
     }
   end
 
@@ -566,13 +574,6 @@ defmodule Receipts.AI.CompSuggestion do
 
   defp encode_context(context), do: Jason.encode!(context, pretty: true)
 
-  defp decode_context(context_json) do
-    case Jason.decode(context_json) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, error} -> {:error, {:invalid_context_json, error}}
-    end
-  end
-
   defp encode_context_config(context_config), do: Jason.encode!(context_config, pretty: true)
 
   defp context_config_from_attrs(opts, attrs) do
@@ -718,11 +719,16 @@ defmodule Receipts.AI.CompSuggestion do
   defp enabled_context_blocks(_context_config), do: MapSet.new(default_context_block_keys())
 
   defp render_prompt_template(template, context_json) do
-    if String.contains?(template, @context_placeholder) do
-      String.replace(template, @context_placeholder, context_json)
-    else
-      template <> "\n\nContext:\n" <> context_json
-    end
+    template
+    |> strip_legacy_context_placeholder()
+    |> then(&(&1 <> "\n\nContext:\n" <> context_json))
+  end
+
+  defp strip_legacy_context_placeholder(template) do
+    template
+    |> String.replace(~r/\n*Context:\s*\{\{context_json\}\}\s*/i, "")
+    |> String.replace("{{context_json}}", "")
+    |> String.trim()
   end
 
   defp parse_temperature(value) when is_float(value), do: clamp_temperature(value)

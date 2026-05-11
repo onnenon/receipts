@@ -86,6 +86,7 @@ defmodule ReceiptsWeb do
       import Phoenix.HTML
       # Core UI components
       import ReceiptsWeb.CoreComponents
+      import ReceiptsWeb.AIComponents
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

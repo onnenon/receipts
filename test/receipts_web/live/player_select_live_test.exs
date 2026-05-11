@@ -244,15 +244,30 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     assert has_element?(view, "#comp-prompt-lab-header", "From 2025")
     assert has_element?(view, "#comp-prompt-lab-header", "To 2026")
     assert has_element?(view, "#temperature-help", "Default: 0.25")
+    assert has_element?(view, "#context-block-accordion")
+    refute has_element?(view, "#context-block-accordion[open]")
     assert has_element?(view, "#context-block-help", "Context included in this run")
     assert has_element?(view, "#context-block-recent_non_shared_top_champions")
+
+    assert has_element?(
+             view,
+             "#context-block-schema-recent_non_shared_top_champions[title*='champion summary']"
+           )
+
+    assert has_element?(
+             view,
+             "#context-block-schema-shared_position_stats[title*='avg_damage_dealt']"
+           )
+
     assert has_element?(view, "#prompt_lab_context_config_json")
+    assert has_element?(view, "#prompt-text-fields")
+    refute render(view) =~ "{{context_json}}"
 
     view
     |> form("#comp-prompt-lab-form", %{
       "prompt_lab" => %{
         "system_instruction" => "Use only the supplied JSON.",
-        "prompt_template" => "Generate a comp suggestion.\n\nContext:\n{{context_json}}",
+        "prompt_template" => "Generate a comp suggestion.",
         "context_blocks" => [
           "shared_group_stats",
           "player_accounts",
@@ -309,7 +324,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     |> form("#comp-prompt-lab-form", %{
       "prompt_lab" => %{
         "system_instruction" => "Use only the supplied JSON.",
-        "prompt_template" => "Generate a comp suggestion.\n\nContext:\n{{context_json}}",
+        "prompt_template" => "Generate a comp suggestion.",
         "context_blocks" => [""],
         "temperature" => "0.25"
       }

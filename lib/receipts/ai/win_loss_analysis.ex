@@ -3,9 +3,112 @@ defmodule Receipts.AI.WinLossAnalysis do
 
   require Ash.Query
 
-  alias Receipts.LoL.{Queries, Queue, WinLossAnalysisCache}
+  alias Receipts.LoL.{Queries, Queue, WinLossAnalysisCache, WinLossPromptLabRun}
 
   @cache_ttl_seconds 86_400
+  @default_temperature 0.2
+  @default_system_instruction """
+  You are analyzing recent League of Legends games for a private friend group.
+  Use only the supplied JSON. Give balanced feedback: celebrate who is carrying
+  or making games easier, call out who is underperforming, and point lighthearted
+  blame where the stat lines support it. Do not favor wins or losses by default;
+  explain what is working in wins, what is breaking in losses, and what concrete
+  adjustments the group should try. Anchor claims in stat lines from recent shared
+  games first, then recent individual form.
+  Be explicit about small samples and team context. Do not invent player history.
+  All players in this friend group are men; use he/him/his pronouns for every player.
+  Write blunt but fair user-facing prose. Never include raw JSON path names, snake_case keys,
+  or dotted references in the response.
+  """
+  @default_prompt_template """
+  Generate a game analysis for this selected group.
+
+  Return JSON matching the schema. Use player_id values exactly as provided.
+  Cover both wins and losses without treating either as more important by default.
+  Include kudos, useful feedback, and fun-but-fair blame for who is carrying hard
+  and who is not pulling weight.
+  """
+  @context_block_definitions [
+    %{
+      "key" => "shared_group_stats",
+      "label" => "Shared group stats",
+      "description" => "Adds total shared game count and aggregate group win/loss record.",
+      "schema" =>
+        "shared_games: {count, group: {games, wins, losses, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score}}"
+    },
+    %{
+      "key" => "shared_recent_games",
+      "label" => "Recent shared games",
+      "description" =>
+        "Adds recent game-by-game breakdown for matches the whole group played together.",
+      "schema" =>
+        "shared_games.recent: [{match_id, played_at, group_win?, duration_seconds, participants: [{player_name, champion, position, win, kills, deaths, assists, cs, damage_dealt, vision_score}]}]"
+    },
+    %{
+      "key" => "player_accounts",
+      "label" => "Player accounts",
+      "description" => "Adds each player's Riot account handles and regions.",
+      "schema" => "accounts: [{game_name, tag_line, region}]"
+    },
+    %{
+      "key" => "player_shared_summary",
+      "label" => "Player shared summary",
+      "description" => "Adds each player's aggregate stats across all shared games.",
+      "schema" =>
+        "shared_summary: {games, wins, losses, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score}"
+    },
+    %{
+      "key" => "player_shared_loss_summary",
+      "label" => "Player shared loss summary",
+      "description" =>
+        "Adds each player's stats from shared games the group lost — useful for diagnosing loss patterns.",
+      "schema" =>
+        "shared_loss_summary: {games, wins, losses, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score}"
+    },
+    %{
+      "key" => "player_shared_positions",
+      "label" => "Player shared positions",
+      "description" => "Adds each player's role breakdown from shared games.",
+      "schema" =>
+        "shared_positions: [{position, games, wins, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs}]"
+    },
+    %{
+      "key" => "player_recent_individual_summary",
+      "label" => "Player recent individual summary",
+      "description" => "Adds each player's recent aggregate stats outside the shared game set.",
+      "schema" =>
+        "recent_individual_summary: {games, wins, losses, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs, avg_damage_dealt, avg_vision_score}"
+    },
+    %{
+      "key" => "player_recent_individual_positions",
+      "label" => "Player recent individual positions",
+      "description" => "Adds each player's recent role breakdown from individual games.",
+      "schema" =>
+        "recent_individual_positions: [{position, games, wins, win_rate, avg_kills, avg_deaths, avg_assists, avg_cs}]"
+    },
+    %{
+      "key" => "player_recent_shared_games",
+      "label" => "Player recent shared games",
+      "description" => "Adds each player's per-game stats from recent shared matches.",
+      "schema" =>
+        "recent_shared_games: [{champion, position, win, kills, deaths, assists, cs, damage_dealt, vision_score, game_datetime}]"
+    },
+    %{
+      "key" => "player_recent_individual_games",
+      "label" => "Player recent individual games",
+      "description" =>
+        "Adds each player's recent individual game results for current-form context.",
+      "schema" =>
+        "recent_individual_games: [{champion, position, win, kills, deaths, assists, cs, damage_dealt, vision_score, game_datetime}]"
+    },
+    %{
+      "key" => "interpretation_notes",
+      "label" => "Interpretation notes",
+      "description" =>
+        "Adds guardrails explaining shared-game context, individual form, and small sample handling.",
+      "schema" => "note: string"
+    }
+  ]
 
   def analyze(player_ids, opts \\ []) do
     with {:ok, context} <- Queries.win_loss_analysis_context_for_players(player_ids, opts),
@@ -14,6 +117,71 @@ defmodule Receipts.AI.WinLossAnalysis do
       {:ok, normalize_response(response, context)}
     end
   end
+
+  def prompt_lab_defaults(player_ids, opts \\ []) do
+    with {:ok, _context} <- Queries.win_loss_analysis_context_for_players(player_ids, opts) do
+      {:ok,
+       %{
+         system_instruction: default_system_instruction(),
+         prompt_template: default_prompt_template(),
+         context_config_json: encode_context_config(default_context_config(opts)),
+         context_blocks: default_context_block_keys(),
+         temperature: @default_temperature
+       }}
+    end
+  end
+
+  def trial_prompt(player_ids, opts, attrs) do
+    system_instruction = Map.get(attrs, "system_instruction", default_system_instruction())
+    prompt_template = Map.get(attrs, "prompt_template", default_prompt_template())
+    temperature = parse_temperature(Map.get(attrs, "temperature", @default_temperature))
+    context_config = context_config_from_attrs(opts, attrs)
+
+    with {:ok, raw_context} <- Queries.win_loss_analysis_context_for_players(player_ids, opts),
+         context = apply_context_config(raw_context, context_config),
+         context_json = encode_context(context),
+         {:ok, response} <-
+           ai_client().generate_structured(
+             render_prompt_template(prompt_template, context_json),
+             response_schema(),
+             ai_opts(system_instruction: system_instruction, temperature: temperature)
+           ),
+         analysis = normalize_response(response, raw_context),
+         {:ok, record} <-
+           store_prompt_lab_run(player_ids, opts, %{
+             system_instruction: system_instruction,
+             prompt_template: prompt_template,
+             context: context,
+             context_config: context_config,
+             temperature: temperature,
+             analysis: analysis
+           }) do
+      {:ok, prompt_lab_result(record)}
+    end
+  end
+
+  def rate_run(run_id, rating) when rating in 1..5 do
+    with {:ok, record} <- Ash.get(WinLossPromptLabRun, run_id),
+         {:ok, _} <-
+           record
+           |> Ash.Changeset.for_update(:update_quality, %{quality_rating: rating})
+           |> Ash.update() do
+      :ok
+    end
+  end
+
+  def prompt_lab_history(player_ids, opts \\ []) do
+    player_ids
+    |> cache_key(opts)
+    |> prompt_lab_history_records()
+    |> Enum.map(&prompt_lab_result/1)
+  end
+
+  def default_system_instruction, do: @default_system_instruction
+
+  def default_prompt_template, do: @default_prompt_template
+
+  def context_block_definitions, do: @context_block_definitions
 
   def fetch_or_generate(player_ids, opts \\ []) do
     force? = Keyword.get(opts, :force, false)
@@ -105,6 +273,31 @@ defmodule Receipts.AI.WinLossAnalysis do
     |> Ash.create()
   end
 
+  defp store_prompt_lab_run(player_ids, opts, attrs) do
+    WinLossPromptLabRun
+    |> Ash.Changeset.for_create(:create, %{
+      group_key: cache_key(player_ids, opts),
+      player_ids: normalize_player_ids(player_ids),
+      filters: cache_filters(opts),
+      system_instruction: attrs.system_instruction,
+      prompt_template: attrs.prompt_template,
+      context: attrs.context,
+      context_config: attrs.context_config,
+      temperature: attrs.temperature,
+      analysis: attrs.analysis,
+      generated_at: DateTime.utc_now()
+    })
+    |> Ash.create()
+  end
+
+  defp prompt_lab_history_records(group_key) do
+    WinLossPromptLabRun
+    |> Ash.Query.filter(group_key == ^group_key)
+    |> Ash.Query.sort(generated_at: :desc)
+    |> Ash.Query.limit(10)
+    |> Ash.read!()
+  end
+
   defp analysis_result(record, opts) do
     cached? = Keyword.fetch!(opts, :cached?)
 
@@ -114,6 +307,20 @@ defmodule Receipts.AI.WinLossAnalysis do
       generated_at: record.generated_at,
       cached?: cached?,
       fresh?: fresh?(record)
+    }
+  end
+
+  defp prompt_lab_result(record) do
+    %{
+      id: record.id,
+      analysis: clean_analysis(record.analysis),
+      generated_at: record.generated_at,
+      system_instruction: record.system_instruction,
+      prompt_template: record.prompt_template,
+      context: record.context,
+      context_config: record.context_config,
+      temperature: record.temperature,
+      quality_rating: record.quality_rating
     }
   end
 
@@ -128,39 +335,18 @@ defmodule Receipts.AI.WinLossAnalysis do
     Application.get_env(:receipts, :ai_client, Receipts.AI.Gemini)
   end
 
-  defp ai_opts do
+  defp ai_opts(overrides \\ []) do
     [
-      system_instruction: """
-      You are analyzing recent League of Legends games for a private friend group.
-      Use only the supplied JSON. Give balanced feedback: celebrate who is carrying
-      or making games easier, call out who is underperforming, and point lighthearted
-      blame where the stat lines support it. Do not favor wins or losses by default;
-      explain what is working in wins, what is breaking in losses, and what concrete
-      adjustments the group should try. Anchor claims in stat lines from recent shared
-      games first, then recent individual form.
-      Be explicit about small samples and team context. Do not invent player history.
-      All players in this friend group are men; use he/him/his pronouns for every player.
-      Write blunt but fair user-facing prose. Never include raw JSON path names, snake_case keys,
-      or dotted references in the response.
-      """,
-      temperature: 0.2,
+      system_instruction:
+        Keyword.get(overrides, :system_instruction, default_system_instruction()),
+      temperature: Keyword.get(overrides, :temperature, @default_temperature),
       connect_timeout: 10_000,
       receive_timeout: 90_000
     ]
   end
 
   defp prompt(context) do
-    """
-    Generate a game analysis for this selected group.
-
-    Return JSON matching the schema. Use player_id values exactly as provided.
-    Cover both wins and losses without treating either as more important by default.
-    Include kudos, useful feedback, and fun-but-fair blame for who is carrying hard
-    and who is not pulling weight.
-
-    Context:
-    #{Jason.encode!(context)}
-    """
+    render_prompt_template(default_prompt_template(), Jason.encode!(context))
   end
 
   defp response_schema do
@@ -316,4 +502,180 @@ defmodule Receipts.AI.WinLossAnalysis do
   end
 
   defp clean_prose(value), do: to_string(value || "")
+
+  defp encode_context(context), do: Jason.encode!(context, pretty: true)
+
+  defp encode_context_config(context_config), do: Jason.encode!(context_config, pretty: true)
+
+  defp context_config_from_attrs(opts, attrs) do
+    cond do
+      Map.has_key?(attrs, "context_blocks") ->
+        selected_context_config(opts, Map.get(attrs, "context_blocks", []))
+
+      true ->
+        case Jason.decode(Map.get(attrs, "context_config_json", "")) do
+          {:ok, decoded} when is_map(decoded) -> decoded
+          _ -> default_context_config(opts)
+        end
+    end
+  end
+
+  defp selected_context_config(opts, selected_keys) do
+    selected_keys =
+      selected_keys
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.reject(&(&1 == ""))
+      |> MapSet.new()
+
+    %{
+      "version" => 1,
+      "mode" => "selected_win_loss_analysis_context",
+      "filters" => cache_filters(opts),
+      "blocks" =>
+        Enum.map(@context_block_definitions, fn block ->
+          %{
+            "key" => block["key"],
+            "enabled" => MapSet.member?(selected_keys, block["key"]),
+            "params" => %{}
+          }
+        end)
+    }
+  end
+
+  defp default_context_config(opts) do
+    %{
+      "version" => 1,
+      "mode" => "default_win_loss_analysis_context",
+      "filters" => cache_filters(opts),
+      "blocks" =>
+        Enum.map(@context_block_definitions, fn block ->
+          %{"key" => block["key"], "enabled" => true, "params" => %{}}
+        end)
+    }
+  end
+
+  defp default_context_block_keys do
+    Enum.map(@context_block_definitions, & &1["key"])
+  end
+
+  defp apply_context_config(context, context_config) do
+    enabled = enabled_context_blocks(context_config)
+
+    base = %{
+      filters: context.filters,
+      selected_players: context.selected_players
+    }
+
+    base
+    |> maybe_put_shared_games(context.shared_games, enabled)
+    |> maybe_put_context(:notes, context.notes, enabled, "interpretation_notes")
+    |> Map.put(:players, Enum.map(context.players, &filter_player_context(&1, enabled)))
+  end
+
+  defp maybe_put_shared_games(ctx, shared_games, enabled) do
+    include_stats? = MapSet.member?(enabled, "shared_group_stats")
+    include_recent? = MapSet.member?(enabled, "shared_recent_games")
+
+    cond do
+      include_stats? and include_recent? ->
+        Map.put(ctx, :shared_games, shared_games)
+
+      include_stats? ->
+        Map.put(ctx, :shared_games, Map.drop(shared_games, [:recent]))
+
+      include_recent? ->
+        Map.put(ctx, :shared_games, %{
+          count: shared_games.count,
+          recent: shared_games.recent
+        })
+
+      true ->
+        ctx
+    end
+  end
+
+  defp filter_player_context(player, enabled) do
+    %{id: player.id, name: player.name}
+    |> maybe_put_context(:accounts, player.accounts, enabled, "player_accounts")
+    |> maybe_put_context(:shared_summary, player.shared_summary, enabled, "player_shared_summary")
+    |> maybe_put_context(
+      :shared_loss_summary,
+      player.shared_loss_summary,
+      enabled,
+      "player_shared_loss_summary"
+    )
+    |> maybe_put_context(
+      :shared_positions,
+      player.shared_positions,
+      enabled,
+      "player_shared_positions"
+    )
+    |> maybe_put_context(
+      :recent_individual_summary,
+      player.recent_individual_summary,
+      enabled,
+      "player_recent_individual_summary"
+    )
+    |> maybe_put_context(
+      :recent_individual_positions,
+      player.recent_individual_positions,
+      enabled,
+      "player_recent_individual_positions"
+    )
+    |> maybe_put_context(
+      :recent_shared_games,
+      player.recent_shared_games,
+      enabled,
+      "player_recent_shared_games"
+    )
+    |> maybe_put_context(
+      :recent_individual_games,
+      player.recent_individual_games,
+      enabled,
+      "player_recent_individual_games"
+    )
+  end
+
+  defp maybe_put_context(ctx, key, value, enabled, block_key) do
+    if MapSet.member?(enabled, block_key), do: Map.put(ctx, key, value), else: ctx
+  end
+
+  defp enabled_context_blocks(%{"blocks" => blocks}) do
+    blocks
+    |> Enum.filter(&Map.get(&1, "enabled", false))
+    |> Enum.map(&Map.get(&1, "key"))
+    |> MapSet.new()
+  end
+
+  defp enabled_context_blocks(_context_config), do: MapSet.new(default_context_block_keys())
+
+  defp render_prompt_template(template, context_json) do
+    template
+    |> strip_legacy_context_placeholder()
+    |> then(&(&1 <> "\n\nContext:\n" <> context_json))
+  end
+
+  defp strip_legacy_context_placeholder(template) do
+    template
+    |> String.replace(~r/\n*Context:\s*\{\{context_json\}\}\s*/i, "")
+    |> String.replace("{{context_json}}", "")
+    |> String.trim()
+  end
+
+  defp parse_temperature(value) when is_float(value), do: clamp_temperature(value)
+  defp parse_temperature(value) when is_integer(value), do: clamp_temperature(value / 1)
+
+  defp parse_temperature(value) when is_binary(value) do
+    case Float.parse(value) do
+      {temperature, ""} -> clamp_temperature(temperature)
+      _ -> @default_temperature
+    end
+  end
+
+  defp parse_temperature(_value), do: @default_temperature
+
+  defp clamp_temperature(value) when value < 0.0, do: 0.0
+  defp clamp_temperature(value) when value > 2.0, do: 2.0
+  defp clamp_temperature(value), do: value
 end

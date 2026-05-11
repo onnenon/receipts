@@ -817,6 +817,19 @@ defmodule ReceiptsWeb.PlayerLive do
     ~p"/players/compare/prompt-lab?#{query}"
   end
 
+  defp win_loss_prompt_lab_path(assigns) do
+    query =
+      [
+        ids: Enum.join(assigns.player_ids, ","),
+        queues: assigns.enabled_queues |> MapSet.to_list() |> Enum.sort() |> Enum.join(","),
+        from_year: assigns.from_year,
+        to_year: assigns.to_year
+      ]
+      |> Enum.reject(fn {_key, value} -> is_nil(value) || value == "" end)
+
+    ~p"/players/compare/win-loss-prompt-lab?#{query}"
+  end
+
   @tier_order ~w(IRON BRONZE SILVER GOLD PLATINUM EMERALD DIAMOND MASTER GRANDMASTER CHALLENGER)
   @division_order ~w(IV III II I)
 
@@ -1004,19 +1017,6 @@ defmodule ReceiptsWeb.PlayerLive do
   defp win_rate_bg(rate) when rate >= 55.0, do: "bg-success/15 text-success border-success/30"
   defp win_rate_bg(rate) when rate < 45.0, do: "bg-error/15 text-error border-error/30"
   defp win_rate_bg(_), do: "bg-base-300/50 text-base-content/70 border-base-300"
-
-  defp confidence_badge_class("high"), do: "border-success/30 bg-success/15 text-success"
-  defp confidence_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
-  defp confidence_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
-
-  defp severity_badge_class("high"), do: "border-error/30 bg-error/15 text-error"
-  defp severity_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
-  defp severity_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
-
-  defp trend_badge_class("carrying"), do: "border-success/30 bg-success/15 text-success"
-  defp trend_badge_class("struggling"), do: "border-error/30 bg-error/15 text-error"
-  defp trend_badge_class("volatile"), do: "border-warning/30 bg-warning/15 text-warning"
-  defp trend_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
 
   defp rank_tier_glow(%{rank_tier: "CHALLENGER"}), do: "bg-yellow-300"
   defp rank_tier_glow(%{rank_tier: "GRANDMASTER"}), do: "bg-red-500"
@@ -1569,131 +1569,10 @@ defmodule ReceiptsWeb.PlayerLive do
 
               <%= if @comp_suggestion do %>
                 <div id="comp-suggestion-result" class="space-y-4 border-t border-base-300 px-4 py-4">
-                  <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p class="max-w-3xl text-sm leading-6 text-base-content/70">
-                        {@comp_suggestion["summary"]}
-                      </p>
-                      <p
-                        :if={@comp_suggestion_generated_at}
-                        id="comp-suggestion-generated-at"
-                        class="mt-1 text-xs text-base-content/40"
-                      >
-                        Generated {format_datetime(@comp_suggestion_generated_at)}
-                      </p>
-                    </div>
-                    <span class={[
-                      "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
-                      confidence_badge_class(@comp_suggestion["confidence"])
-                    ]}>
-                      {@comp_suggestion["confidence"]} confidence
-                    </span>
-                  </div>
-
-                  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <%= for slot <- @comp_suggestion["recommended_lineup"] do %>
-                      <article
-                        id={"comp-slot-#{slot["player_id"]}"}
-                        class={[
-                          "rounded-xl border p-4",
-                          position_card_class(slot["position"])
-                        ]}
-                      >
-                        <div class="flex items-start justify-between gap-3">
-                          <div>
-                            <h3 class="text-lg font-bold tracking-tight">{slot["player_name"]}</h3>
-                            <p class="text-sm font-semibold text-base-content/60">
-                              {slot["position_label"]}
-                            </p>
-                          </div>
-                          <span class={[
-                            "inline-flex rounded-md px-2 py-1 text-xs font-bold ring-1",
-                            position_badge_class(slot["position"])
-                          ]}>
-                            {slot["position_label"]}
-                          </span>
-                        </div>
-
-                        <%= if slot["champions"] != [] do %>
-                          <div class="mt-3 flex flex-wrap gap-1.5">
-                            <%= for champion <- slot["champions"] do %>
-                              <span class="rounded-md border border-base-300 bg-base-100/70 px-2 py-1 text-xs font-semibold text-base-content/70">
-                                {champion}
-                              </span>
-                            <% end %>
-                          </div>
-                        <% end %>
-
-                        <p class="mt-3 text-sm leading-6 text-base-content/70">
-                          {slot["reason"]}
-                        </p>
-
-                        <%= if slot["evidence"] != [] do %>
-                          <ul class="mt-3 space-y-1.5">
-                            <%= for evidence <- slot["evidence"] do %>
-                              <li class="flex gap-2 text-xs leading-5 text-base-content/55">
-                                <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
-                                </span>
-                                <span>{evidence}</span>
-                              </li>
-                            <% end %>
-                          </ul>
-                        <% end %>
-                      </article>
-                    <% end %>
-                  </div>
-
-                  <%= if @comp_suggestion["alternatives"] != [] do %>
-                    <div class="space-y-2">
-                      <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                        Alternatives
-                      </p>
-                      <div class="grid gap-3 md:grid-cols-2">
-                        <%= for alternative <- @comp_suggestion["alternatives"] do %>
-                          <div class="space-y-3 rounded-xl border border-base-300 bg-base-100/60 p-3">
-                            <p class="text-sm font-bold">{alternative["name"]}</p>
-                            <p class="mt-1 text-xs leading-5 text-base-content/55">
-                              {alternative["notes"]}
-                            </p>
-                            <%= if alternative["lineup"] != [] do %>
-                              <div class="grid gap-1.5">
-                                <%= for slot <- alternative["lineup"] do %>
-                                  <div class="flex items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-200/70 px-2.5 py-2">
-                                    <span class="truncate text-xs font-semibold text-base-content/75">
-                                      {slot["player_name"]}
-                                    </span>
-                                    <span class={[
-                                      "shrink-0 rounded px-1.5 py-px text-xs font-bold ring-1",
-                                      position_badge_class(slot["position"])
-                                    ]}>
-                                      {slot["position_label"]}
-                                    </span>
-                                  </div>
-                                <% end %>
-                              </div>
-                            <% else %>
-                              <p class="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-warning">
-                                Gemini did not return a full lineup for this alternative.
-                              </p>
-                            <% end %>
-                          </div>
-                        <% end %>
-                      </div>
-                    </div>
-                  <% end %>
-
-                  <%= if @comp_suggestion["caveats"] != [] do %>
-                    <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
-                      <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                        Caveats
-                      </p>
-                      <ul class="mt-2 space-y-1">
-                        <%= for caveat <- @comp_suggestion["caveats"] do %>
-                          <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
-                        <% end %>
-                      </ul>
-                    </div>
-                  <% end %>
+                  <.comp_suggestion_result
+                    suggestion={@comp_suggestion}
+                    generated_at={@comp_suggestion_generated_at}
+                  />
                 </div>
               <% end %>
             </div>
@@ -1722,6 +1601,14 @@ defmodule ReceiptsWeb.PlayerLive do
               <div class="flex shrink-0 items-center gap-2">
                 <%= if @win_loss_analysis_open do %>
                   <%= if @admin_authenticated do %>
+                    <.link
+                      id="toggle-win-loss-prompt-lab"
+                      navigate={win_loss_prompt_lab_path(assigns)}
+                      class="inline-flex items-center justify-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-bold text-base-content/65 shadow-sm transition hover:border-base-content/20 hover:text-base-content"
+                    >
+                      <.icon name="hero-beaker-mini" class="h-4 w-4" />
+                      Prompt Lab
+                    </.link>
                     <button
                       id="analyze-win-loss-button"
                       type="button"
@@ -1850,136 +1737,10 @@ defmodule ReceiptsWeb.PlayerLive do
 
               <%= if @win_loss_analysis do %>
                 <div id="win-loss-analysis-result" class="space-y-4 border-t border-base-300 px-4 py-4">
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p class="max-w-3xl text-sm leading-6 text-base-content/70">
-                      {@win_loss_analysis["summary"]}
-                    </p>
-                    <p
-                      :if={@win_loss_analysis_generated_at}
-                      id="win-loss-analysis-generated-at"
-                      class="mt-1 text-xs text-base-content/40"
-                    >
-                      Generated {format_datetime(@win_loss_analysis_generated_at)}
-                    </p>
-                  </div>
-                  <span class={[
-                    "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
-                    confidence_badge_class(@win_loss_analysis["confidence"])
-                  ]}>
-                    {@win_loss_analysis["confidence"]} confidence
-                  </span>
-                </div>
-
-                <%= if @win_loss_analysis["loss_causes"] != [] do %>
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <%= for cause <- @win_loss_analysis["loss_causes"] do %>
-                      <article class="rounded-xl border border-base-300 bg-base-100/60 p-4">
-                        <div class="flex items-start justify-between gap-3">
-                          <h3 class="text-sm font-bold">{cause["title"]}</h3>
-                          <span class={[
-                            "rounded-md border px-2 py-0.5 text-xs font-bold capitalize",
-                            severity_badge_class(cause["severity"])
-                          ]}>
-                            {cause["severity"]}
-                          </span>
-                        </div>
-                        <p class="mt-2 text-sm leading-6 text-base-content/65">{cause["details"]}</p>
-                        <ul class="mt-3 space-y-1.5">
-                          <%= for evidence <- cause["evidence"] do %>
-                            <li class="flex gap-2 text-xs leading-5 text-base-content/55">
-                              <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
-                              </span>
-                              <span>{evidence}</span>
-                            </li>
-                          <% end %>
-                        </ul>
-                      </article>
-                    <% end %>
-                  </div>
-                <% end %>
-
-                <%= if @win_loss_analysis["player_readouts"] != [] do %>
-                  <div class="space-y-2">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                      Player Readouts
-                    </p>
-                    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      <%= for readout <- @win_loss_analysis["player_readouts"] do %>
-                        <article
-                          id={"win-loss-player-#{readout["player_id"]}"}
-                          class="rounded-xl border border-base-300 bg-base-100/60 p-4"
-                        >
-                          <div class="flex items-start justify-between gap-3">
-                            <h3 class="text-lg font-bold tracking-tight">{readout["player_name"]}</h3>
-                            <span class={[
-                              "rounded-md border px-2 py-0.5 text-xs font-bold capitalize",
-                              trend_badge_class(readout["trend"])
-                            ]}>
-                              {readout["trend"]}
-                            </span>
-                          </div>
-                          <p class="mt-2 text-sm leading-6 text-base-content/70">
-                            {readout["verdict"]}
-                          </p>
-                          <ul class="mt-3 space-y-1.5">
-                            <%= for evidence <- readout["evidence"] do %>
-                              <li class="flex gap-2 text-xs leading-5 text-base-content/55">
-                                <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
-                                </span>
-                                <span>{evidence}</span>
-                              </li>
-                            <% end %>
-                          </ul>
-                        </article>
-                      <% end %>
-                    </div>
-                  </div>
-                <% end %>
-
-                <%= if @win_loss_analysis["carry_highlights"] != [] do %>
-                  <div class="rounded-xl border border-success/30 bg-success/10 p-3">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-success">
-                      Carry Highlights
-                    </p>
-                    <div class="mt-2 grid gap-2 md:grid-cols-2">
-                      <%= for highlight <- @win_loss_analysis["carry_highlights"] do %>
-                        <div>
-                          <p class="text-sm font-bold">{highlight["title"]}</p>
-                          <p class="mt-1 text-xs leading-5 text-base-content/60">
-                            {highlight["details"]}
-                          </p>
-                        </div>
-                      <% end %>
-                    </div>
-                  </div>
-                <% end %>
-
-                <%= if @win_loss_analysis["recommendations"] != [] do %>
-                  <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                      Adjustments
-                    </p>
-                    <ul class="mt-2 space-y-1">
-                      <%= for recommendation <- @win_loss_analysis["recommendations"] do %>
-                        <li class="text-xs leading-5 text-base-content/55">{recommendation}</li>
-                      <% end %>
-                    </ul>
-                  </div>
-                <% end %>
-
-                <%= if @win_loss_analysis["caveats"] != [] do %>
-                  <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                      Caveats
-                    </p>
-                    <ul class="mt-2 space-y-1">
-                      <%= for caveat <- @win_loss_analysis["caveats"] do %>
-                        <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
-                      <% end %>
-                    </ul>
-                  </div>
-                <% end %>
+                  <.win_loss_analysis_result
+                    analysis={@win_loss_analysis}
+                    generated_at={@win_loss_analysis_generated_at}
+                  />
                 </div>
               <% end %>
             </div>

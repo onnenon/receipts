@@ -34,6 +34,7 @@ defmodule ReceiptsWeb.Router do
 
     live_session :admin, on_mount: {ReceiptsWeb.AdminAuth, :ensure_authenticated} do
       live("/players/compare/prompt-lab", CompPromptLabLive, :show)
+      live("/players/compare/win-loss-prompt-lab", WinLossPromptLabLive, :show)
       live("/admin/players", Admin.PlayersLive, :index)
       live("/admin/players/:id", Admin.PlayerDetailLive, :show)
     end

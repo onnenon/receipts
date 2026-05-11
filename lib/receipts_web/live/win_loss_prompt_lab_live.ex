@@ -1,10 +1,10 @@
-defmodule ReceiptsWeb.CompPromptLabLive do
+defmodule ReceiptsWeb.WinLossPromptLabLive do
   use ReceiptsWeb, :live_view
 
   require Ash.Query
   require Logger
 
-  alias Receipts.AI.CompSuggestion
+  alias Receipts.AI.WinLossAnalysis
   alias Receipts.LoL.{Player, Queue}
 
   @impl true
@@ -28,7 +28,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
        |> assign(:from_year, from_year)
        |> assign(:to_year, to_year)
        |> assign(:opts, opts)
-       |> assign(:context_blocks, CompSuggestion.context_block_definitions())
+       |> assign(:context_blocks, WinLossAnalysis.context_block_definitions())
        |> assign(:form, to_form(%{}, as: :prompt_lab))
        |> assign(:inputs, %{})
        |> assign(:result, nil)
@@ -74,7 +74,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
      |> assign(:error, nil)
      |> assign(:loading, true)
      |> start_async(:run_prompt_lab, fn ->
-       CompSuggestion.trial_prompt(player_ids, opts, params)
+       WinLossAnalysis.trial_prompt(player_ids, opts, params)
      end)}
   end
 
@@ -109,7 +109,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
     if run_id do
       rating = String.to_integer(rating_str)
 
-      case CompSuggestion.rate_run(run_id, rating) do
+      case WinLossAnalysis.rate_run(run_id, rating) do
         :ok ->
           {:noreply,
            socket
@@ -135,7 +135,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
   end
 
   def handle_async(:run_prompt_lab, {:ok, {:error, reason}}, socket) do
-    Logger.error("Comp prompt lab failed: #{inspect(reason)}")
+    Logger.error("Win/loss prompt lab failed: #{inspect(reason)}")
 
     {:noreply,
      socket
@@ -144,7 +144,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
   end
 
   def handle_async(:run_prompt_lab, {:exit, reason}, socket) do
-    Logger.error("Comp prompt lab task exited: #{inspect(reason)}")
+    Logger.error("Win/loss prompt lab task exited: #{inspect(reason)}")
 
     {:noreply,
      socket
@@ -153,7 +153,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
   end
 
   defp load_defaults(socket) do
-    case CompSuggestion.prompt_lab_defaults(socket.assigns.player_ids, socket.assigns.opts) do
+    case WinLossAnalysis.prompt_lab_defaults(socket.assigns.player_ids, socket.assigns.opts) do
       {:ok, defaults} ->
         assign_inputs(socket, defaults)
 
@@ -166,7 +166,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
     assign(
       socket,
       :history,
-      CompSuggestion.prompt_lab_history(socket.assigns.player_ids, socket.assigns.opts)
+      WinLossAnalysis.prompt_lab_history(socket.assigns.player_ids, socket.assigns.opts)
     )
   end
 
@@ -182,7 +182,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
 
   defp assign_run(socket, run) do
     socket
-    |> assign(:result, run.suggestion)
+    |> assign(:result, run.analysis)
     |> assign(:run_id, run.id)
     |> assign(:generated_at, run.generated_at)
     |> assign(:quality_rating, Map.get(run, :quality_rating))
@@ -202,7 +202,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
         ),
       "context_blocks" => context_blocks_from_values(values),
       "temperature" =>
-        to_string(Map.get(values, :temperature) || Map.get(values, "temperature") || "0.25")
+        to_string(Map.get(values, :temperature) || Map.get(values, "temperature") || "0.2")
     }
   end
 
@@ -222,13 +222,13 @@ defmodule ReceiptsWeb.CompPromptLabLive do
   end
 
   defp selected_context_blocks_from_json("") do
-    Enum.map(CompSuggestion.context_block_definitions(), & &1["key"])
+    Enum.map(WinLossAnalysis.context_block_definitions(), & &1["key"])
   end
 
   defp selected_context_blocks_from_json(context_config_json) do
     case Jason.decode(context_config_json) do
       {:ok, context_config} -> selected_context_blocks(context_config)
-      _ -> Enum.map(CompSuggestion.context_block_definitions(), & &1["key"])
+      _ -> Enum.map(WinLossAnalysis.context_block_definitions(), & &1["key"])
     end
   end
 
@@ -240,7 +240,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
   end
 
   defp selected_context_blocks(_context_config),
-    do: Enum.map(CompSuggestion.context_block_definitions(), & &1["key"])
+    do: Enum.map(WinLossAnalysis.context_block_definitions(), & &1["key"])
 
   defp normalize_context_blocks(values) do
     values
@@ -316,13 +316,13 @@ defmodule ReceiptsWeb.CompPromptLabLive do
     <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
       <div class="space-y-6">
         <div
-          id="comp-prompt-lab-header"
+          id="win-loss-prompt-lab-header"
           class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-200 p-5 sm:flex-row sm:items-start sm:justify-between"
         >
           <div>
             <p class="text-xs font-semibold uppercase tracking-widest text-primary">Prompt Lab</p>
             <h1 class="mt-1 text-3xl font-extrabold tracking-tight">
-              Comp Suggestion
+              Win/Loss Analysis
             </h1>
             <p class="mt-1 text-base font-semibold text-base-content/60">
               {Enum.map_join(@players, " + ", & &1.name)}
@@ -349,10 +349,10 @@ defmodule ReceiptsWeb.CompPromptLabLive do
           </.link>
         </div>
 
-        <section id="comp-prompt-lab" class="rounded-xl border border-base-300 bg-base-200 p-4">
+        <section id="win-loss-prompt-lab" class="rounded-xl border border-base-300 bg-base-200 p-4">
           <.form
             for={@form}
-            id="comp-prompt-lab-form"
+            id="win-loss-prompt-lab-form"
             phx-change="update"
             phx-submit="run"
             class="space-y-4"
@@ -361,12 +361,12 @@ defmodule ReceiptsWeb.CompPromptLabLive do
               <div>
                 <p class="text-sm font-bold text-base-content">Experiment</p>
                 <p class="mt-1 text-xs leading-5 text-base-content/50">
-                  Runs are saved as prompt experiments, separate from production comp suggestions.
+                  Runs are saved as prompt experiments, separate from production win/loss analyses.
                 </p>
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 <button
-                  id="reset-comp-prompt-lab"
+                  id="reset-win-loss-prompt-lab"
                   type="button"
                   phx-click="reset"
                   class="inline-flex items-center justify-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-bold text-base-content/65 transition hover:border-base-content/20 hover:text-base-content"
@@ -375,7 +375,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
                   Reset
                 </button>
                 <button
-                  id="run-comp-prompt-lab"
+                  id="run-win-loss-prompt-lab"
                   type="submit"
                   disabled={@loading}
                   class="inline-flex min-w-28 items-center justify-center gap-2 rounded-lg bg-secondary px-3 py-2 text-sm font-bold text-secondary-content shadow-sm transition hover:bg-secondary/90 disabled:cursor-wait disabled:opacity-65"
@@ -400,16 +400,16 @@ defmodule ReceiptsWeb.CompPromptLabLive do
                   min="0"
                   max="2"
                   step="0.05"
-                  placeholder="0.25"
+                  placeholder="0.2"
                   class="w-32 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm text-base-content shadow-sm focus:border-primary focus:outline-none"
                 />
                 <div
                   id="temperature-help"
                   class="rounded-lg border border-base-300 bg-base-100/70 px-3 py-2 text-xs leading-5 text-base-content/55"
                 >
-                  Default: 0.25. Temperature controls how much variation Gemini is allowed to use.
-                  Lower values make runs more consistent and literal; higher values can explore more
-                  wording and lineup alternatives, but make prompt comparisons noisier.
+                  Default: 0.2. Temperature controls how much variation Gemini is allowed to use.
+                  Lower values make runs more consistent and literal; higher values explore more
+                  wording alternatives, but make prompt comparisons noisier.
                 </div>
               </div>
 
@@ -434,9 +434,9 @@ defmodule ReceiptsWeb.CompPromptLabLive do
                   >
                     <p class="font-bold text-base-content/70">Context included in this run</p>
                     <p class="mt-1">
-                      Filters, selected player IDs, and player names are always included. The checked
-                      blocks below run server-side data builders and are serialized with each saved
-                      experiment so a good setup can be promoted into production later.
+                      Filters and selected player IDs are always included. The checked blocks below
+                      run server-side data builders and are serialized with each saved experiment so
+                      a good setup can be promoted into production later.
                     </p>
                   </div>
 
@@ -505,7 +505,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
 
           <div
             :if={@error}
-            id="comp-prompt-lab-error"
+            id="win-loss-prompt-lab-error"
             class="mt-3 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
           >
             {@error}
@@ -514,7 +514,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
 
         <section
           :if={@result}
-          id="comp-prompt-lab-result"
+          id="win-loss-prompt-lab-result"
           class="rounded-xl border border-secondary/30 bg-secondary/10 p-4"
         >
           <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -544,12 +544,12 @@ defmodule ReceiptsWeb.CompPromptLabLive do
               </span>
             </div>
           </div>
-          <.comp_suggestion_result suggestion={@result} generated_at={@generated_at} />
+          <.win_loss_analysis_result analysis={@result} generated_at={@generated_at} />
         </section>
 
         <section
           :if={@history != []}
-          id="comp-prompt-lab-history"
+          id="win-loss-prompt-lab-history"
           class="rounded-xl border border-base-300 bg-base-200 p-4"
         >
           <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
@@ -558,7 +558,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
           <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             <%= for run <- @history do %>
               <button
-                id={"view-comp-prompt-lab-run-#{run.id}"}
+                id={"view-win-loss-prompt-lab-run-#{run.id}"}
                 type="button"
                 phx-click="view_run"
                 phx-value-id={run.id}
@@ -586,7 +586,7 @@ defmodule ReceiptsWeb.CompPromptLabLive do
                   </span>
                 </span>
                 <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
-                  {run.suggestion["summary"]}
+                  {run.analysis["summary"]}
                 </span>
               </button>
             <% end %>

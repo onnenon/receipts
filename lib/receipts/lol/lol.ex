@@ -10,5 +10,6 @@ defmodule Receipts.LoL do
     resource(Receipts.LoL.CompSuggestionCache)
     resource(Receipts.LoL.CompPromptLabRun)
     resource(Receipts.LoL.WinLossAnalysisCache)
+    resource(Receipts.LoL.WinLossPromptLabRun)
   end
 end
