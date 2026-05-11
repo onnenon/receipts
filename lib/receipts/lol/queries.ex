@@ -1104,6 +1104,47 @@ defmodule Receipts.LoL.Queries do
   defp comparison_match_ids([], _opts), do: []
   defp comparison_match_ids(player_ids, opts), do: common_match_ids_for_players(player_ids, opts)
 
+  def available_queue_types_for_players([_single_player_id] = player_ids) do
+    player_ids = normalize_ids(player_ids)
+
+    account_ids =
+      Account
+      |> Ash.Query.filter(player_id in ^player_ids)
+      |> Ash.read!()
+      |> Enum.map(& &1.id)
+
+    if account_ids == [] do
+      MapSet.new()
+    else
+      from(p in MatchParticipant,
+        where: p.account_id in ^account_ids and not is_nil(p.queue_type),
+        select: p.queue_type,
+        distinct: true
+      )
+      |> Repo.all()
+      |> MapSet.new()
+    end
+  end
+
+  def available_queue_types_for_players(player_ids) do
+    player_ids = normalize_ids(player_ids)
+    all_queue_types = for {type, _label, _default} <- Queue.ui_queues(), do: type
+
+    match_ids = common_match_ids_for_players(player_ids, queue_types: all_queue_types)
+
+    if match_ids == [] do
+      MapSet.new()
+    else
+      from(p in MatchParticipant,
+        where: p.match_id in ^match_ids and not is_nil(p.queue_type),
+        select: p.queue_type,
+        distinct: true
+      )
+      |> Repo.all()
+      |> MapSet.new()
+    end
+  end
+
   defp normalize_ids(ids) do
     ids
     |> List.wrap()

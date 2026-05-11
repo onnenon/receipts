@@ -12,7 +12,7 @@ config :receipts,
   generators: [timestamp_type: :utc_datetime],
   ash_domains: [Receipts.LoL],
   # How old (in minutes) an account's newest_synced_at must be before SweepAccounts re-enqueues it.
-  sync_stale_minutes: 30
+  sync_stale_minutes: 5
 
 config :receipts, :ai_client, Receipts.AI.Gemini
 
@@ -26,8 +26,8 @@ config :receipts, Oban,
      crontab: [
        # Daily at 4am UTC — champion data changes roughly every two weeks
        {"0 4 * * *", Receipts.Workers.SyncDataDragon},
-       # Hourly sweep — override in dev.exs for faster local syncing
-       {"0 * * * *", Receipts.Workers.SweepAccounts}
+       # Every 5 minutes — override in dev.exs for faster local syncing
+       {"*/5 * * * *", Receipts.Workers.SweepAccounts}
      ]}
   ],
   queues: [default: 10, sync: 5, data_dragon: 2]

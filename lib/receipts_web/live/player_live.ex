@@ -83,6 +83,7 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:position_stats_by_player, position_stats_by_player)
          |> assign(:player_position_stats, player_position_stats)
          |> assign(:enabled_queues, enabled_queues)
+         |> assign(:available_queue_types, Queries.available_queue_types_for_players(player_ids))
          |> assign(:enabled_positions, MapSet.new())
          |> assign(:from_year, nil)
          |> assign(:to_year, nil)
@@ -1086,7 +1087,12 @@ defmodule ReceiptsWeb.PlayerLive do
   def render(assigns) do
     assigns =
       assigns
-      |> assign(:queue_defs, Queue.ui_queues())
+      |> assign(
+        :queue_defs,
+        Enum.filter(Queue.ui_queues(), fn {queue_type, _label, _default} ->
+          MapSet.member?(assigns.available_queue_types, queue_type)
+        end)
+      )
       |> assign(:position_defs, position_defs())
       |> assign(:positions_active?, MapSet.size(assigns.enabled_positions) > 0)
       |> assign(:total_games, total_games(assigns.top_champions))

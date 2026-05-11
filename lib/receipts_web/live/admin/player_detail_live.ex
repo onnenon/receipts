@@ -41,6 +41,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
          socket
          |> assign(:player, player)
          |> assign(:total_games, count_total_games(player.accounts))
+         |> assign(:account_game_counts, game_counts_per_account(player.accounts))
          |> assign(:show_edit, false)
          |> assign(:edit_form, nil)
          |> assign(:show_add_account, false)
@@ -136,7 +137,8 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                    adding_account: false,
                    show_add_account: false,
                    add_account_form: new_add_account_form(),
-                   total_games: count_total_games(updated_accounts)
+                   total_games: count_total_games(updated_accounts),
+                   account_game_counts: Map.put(socket.assigns.account_game_counts, account.id, 0)
                  )
                  |> stream_insert(:accounts, account, at: 0)
                  |> put_flash(:info, "#{game_name}##{tag_line} added. Sync started.")}
@@ -192,6 +194,17 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
     MatchParticipant
     |> Ash.Query.filter(account_id in ^account_ids)
     |> Ash.count!()
+  end
+
+  defp game_counts_per_account(accounts) do
+    Map.new(accounts, fn account ->
+      count =
+        MatchParticipant
+        |> Ash.Query.filter(account_id == ^account.id)
+        |> Ash.count!()
+
+      {account.id, count}
+    end)
   end
 
   defp parse_riot_id(riot_id) do
@@ -392,11 +405,13 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
                     </span>
                   </p>
                   <p class="mt-0.5 text-sm text-base-content/50">
-                    {format_synced_at(account.last_synced_at)}
-                    · History:
-                    {if account.history_fully_synced,
-                      do: "complete ✓",
-                      else: "#{account.oldest_synced_start} matches scanned"}
+                    {Map.get(@account_game_counts, account.id, 0)} games indexed
+                    · {format_synced_at(account.last_synced_at)}
+                    <%= if account.history_fully_synced do %>
+                      · <span class="text-success">history complete ✓</span>
+                    <% else %>
+                      · <span class="text-warning">syncing history…</span>
+                    <% end %>
                   </p>
                 </div>
                 <button

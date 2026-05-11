@@ -71,7 +71,9 @@ defmodule Receipts.LoL.StoredMatchParticipantBackfill do
       position: if(position == "", do: nil, else: position),
       team_id: participant["teamId"],
       items: items,
-      raw_participant: participant
+      raw_participant: participant,
+      game_datetime: match.game_datetime,
+      queue_type: match.queue_type
     })
     |> Ash.create!()
   end
