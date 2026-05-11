@@ -65,7 +65,12 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     {:ok, admin_view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
     assert has_element?(admin_view, "#suggest-comp-button")
 
-    admin_view |> element("#suggest-comp-button") |> render_click()
+    html = admin_view |> element("#suggest-comp-button") |> render_click()
+    assert html =~ "Generating..."
+    assert has_element?(admin_view, "#suggest-comp-button[disabled]")
+    assert has_element?(admin_view, "#comp-suggestion-loading")
+
+    render_async(admin_view)
 
     assert has_element?(admin_view, "#comp-suggestion-result", "Koozie should play mid")
     assert has_element?(admin_view, "#comp-suggestion-result", "Kupo")

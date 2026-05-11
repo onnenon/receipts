@@ -10,6 +10,7 @@ defmodule Receipts.Application do
   @impl true
   def start(_type, _args) do
     log_api_key_status()
+    log_gemini_api_key_status()
     log_admin_password_status()
 
     children =
@@ -70,6 +71,29 @@ defmodule Receipts.Application do
 
       password ->
         Logger.info("[Config] ADMIN_PASSWORD loaded (#{byte_size(password)} bytes)")
+    end
+  end
+
+  defp log_gemini_api_key_status do
+    api_key =
+      :receipts
+      |> Application.get_env(:gemini, [])
+      |> Keyword.get(:api_key)
+
+    case api_key do
+      nil ->
+        Logger.warning("[Config] GEMINI_API_KEY is not set — comp suggestions will fail")
+
+      key ->
+        trimmed = String.trim(key)
+
+        if trimmed != key do
+          Logger.warning(
+            "[Config] GEMINI_API_KEY has leading/trailing whitespace — this will cause auth failures"
+          )
+        end
+
+        Logger.info("[Config] GEMINI_API_KEY loaded (#{byte_size(trimmed)} bytes)")
     end
   end
 

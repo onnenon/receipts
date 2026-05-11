@@ -98,6 +98,7 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:player_results, %{})
          |> assign(:comp_suggestion, nil)
          |> assign(:comp_suggestion_error, nil)
+         |> assign(:comp_suggestion_loading, false)
          |> assign(:recent_queue_filter, nil)}
     end
   end
@@ -275,39 +276,49 @@ defmodule ReceiptsWeb.PlayerLive do
       match_ids: shared_match_ids
     ]
 
-    case CompSuggestion.suggest(player_ids, opts) do
-      {:ok, suggestion} ->
-        {:noreply,
-         socket
-         |> assign(:comp_suggestion, suggestion)
-         |> assign(:comp_suggestion_error, nil)}
-
-      {:error, :missing_api_key} ->
-        {:noreply,
-         socket
-         |> assign(:comp_suggestion, nil)
-         |> assign(
-           :comp_suggestion_error,
-           "GEMINI_API_KEY is not configured for this environment."
-         )}
-
-      {:error, :not_enough_players} ->
-        {:noreply,
-         socket
-         |> assign(:comp_suggestion, nil)
-         |> assign(:comp_suggestion_error, "Select at least two players.")}
-
-      {:error, _reason} ->
-        {:noreply,
-         socket
-         |> assign(:comp_suggestion, nil)
-         |> assign(:comp_suggestion_error, "Comp suggestion failed. Try again in a moment.")}
-    end
+    {:noreply,
+     socket
+     |> assign(:comp_suggestion, nil)
+     |> assign(:comp_suggestion_error, nil)
+     |> assign(:comp_suggestion_loading, true)
+     |> start_async(:comp_suggestion, fn -> CompSuggestion.suggest(player_ids, opts) end)}
   end
 
   def handle_event("suggest_comp", _params, socket) do
     {:noreply, put_flash(socket, :error, "Comp suggestions are admin-only.")}
   end
+
+  @impl true
+  def handle_async(:comp_suggestion, {:ok, {:ok, suggestion}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:comp_suggestion, suggestion)
+     |> assign(:comp_suggestion_error, nil)
+     |> assign(:comp_suggestion_loading, false)}
+  end
+
+  def handle_async(:comp_suggestion, {:ok, {:error, reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:comp_suggestion, nil)
+     |> assign(:comp_suggestion_error, comp_suggestion_error(reason))
+     |> assign(:comp_suggestion_loading, false)}
+  end
+
+  def handle_async(:comp_suggestion, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:comp_suggestion, nil)
+     |> assign(:comp_suggestion_error, comp_suggestion_error(:unknown))
+     |> assign(:comp_suggestion_loading, false)}
+  end
+
+  defp comp_suggestion_error(:missing_api_key),
+    do: "GEMINI_API_KEY is not configured for this environment."
+
+  defp comp_suggestion_error(:not_enough_players), do: "Select at least two players."
+
+  defp comp_suggestion_error(_reason), do: "Comp suggestion failed. Try again in a moment."
 
   defp maybe_rerun(socket) do
     socket = refresh_top_champions(socket)
@@ -403,6 +414,7 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:player_position_stats, player_position_stats)
     |> assign(:comp_suggestion, nil)
     |> assign(:comp_suggestion_error, nil)
+    |> assign(:comp_suggestion_loading, false)
   end
 
   defp run_query(socket) do
@@ -1086,12 +1098,28 @@ defmodule ReceiptsWeb.PlayerLive do
                 id="suggest-comp-button"
                 type="button"
                 phx-click="suggest_comp"
-                class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90"
+                disabled={@comp_suggestion_loading}
+                class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
               >
-                <.icon name="hero-sparkles-mini" class="h-4 w-4" />
-                Suggest Comp
+                <%= if @comp_suggestion_loading do %>
+                  <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
+                  Generating...
+                <% else %>
+                  <.icon name="hero-sparkles-mini" class="h-4 w-4" />
+                  Suggest Comp
+                <% end %>
               </button>
             </div>
+
+            <%= if @comp_suggestion_loading do %>
+              <div
+                id="comp-suggestion-loading"
+                class="flex items-center gap-2 border-t border-base-300 px-4 py-3 text-sm text-base-content/55"
+              >
+                <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin text-primary" />
+                Building comp suggestion from shared games and recent role context.
+              </div>
+            <% end %>
 
             <%= if @comp_suggestion_error do %>
               <div
