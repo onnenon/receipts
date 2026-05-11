@@ -42,7 +42,8 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:selected_champion, nil)
          |> assign(:champion_filter, "")
          |> assign(:champion_sort, :games)
-         |> assign(:champion_limit, nil)
+         |> assign(:champion_limit, 20)
+         |> assign(:min_games, nil)
          |> assign(:filters_open, true)
          |> assign(:champions_open, true)
          |> assign(:result, nil)}
@@ -94,7 +95,20 @@ defmodule ReceiptsWeb.PlayerLive do
   @impl true
   def handle_event("set_champion_sort", %{"by" => by}, socket) do
     sort = if by == "win_rate", do: :win_rate, else: :games
-    {:noreply, assign(socket, :champion_sort, sort)}
+    socket = assign(socket, :champion_sort, sort)
+    socket = if sort != :win_rate, do: assign(socket, :min_games, nil), else: socket
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("set_min_games", %{"min_games" => val}, socket) do
+    min_games =
+      case Integer.parse(val) do
+        {n, ""} when n > 0 -> n
+        _ -> nil
+      end
+
+    {:noreply, assign(socket, :min_games, min_games)}
   end
 
   @impl true
@@ -203,6 +217,10 @@ defmodule ReceiptsWeb.PlayerLive do
 
   defp rank_label(_), do: nil
 
+  defp rank_icon_url(%{rank_tier: "EMERALD"}) do
+    "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/ranked-mini-crests/emerald.svg"
+  end
+
   defp rank_icon_url(%{rank_tier: tier}) when not is_nil(tier) do
     "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/ranked-mini-crests/#{String.downcase(tier)}.png"
   end
@@ -236,11 +254,20 @@ defmodule ReceiptsWeb.PlayerLive do
     Enum.filter(champions, &String.contains?(String.downcase(&1.champion.name), normalized))
   end
 
-  defp apply_sort_and_limit(top_champions, sort_by, limit) do
+  defp apply_sort_and_limit(top_champions, sort_by, limit, min_games) do
+    filtered =
+      case {sort_by, min_games} do
+        {:win_rate, n} when is_integer(n) ->
+          Enum.filter(top_champions, &(&1.games_played >= n))
+
+        _ ->
+          top_champions
+      end
+
     sorted =
       case sort_by do
-        :win_rate -> Enum.sort_by(top_champions, &{-&1.win_rate, -&1.games_played})
-        _ -> top_champions
+        :win_rate -> Enum.sort_by(filtered, &{-&1.win_rate, -&1.games_played})
+        _ -> filtered
       end
 
     case limit do
@@ -330,7 +357,7 @@ defmodule ReceiptsWeb.PlayerLive do
         :displayed_champions,
         assigns.top_champions
         |> filter_champions_by_name(assigns.champion_filter)
-        |> apply_sort_and_limit(assigns.champion_sort, assigns.champion_limit)
+        |> apply_sort_and_limit(assigns.champion_sort, assigns.champion_limit, assigns.min_games)
       )
 
     ~H"""
@@ -607,10 +634,24 @@ defmodule ReceiptsWeb.PlayerLive do
                     >
                       Win Rate
                     </button>
+                    <%= if @champion_sort == :win_rate do %>
+                      <form id="min-games-form" phx-change="set_min_games" class="flex items-center gap-1.5 ml-1">
+                        <span class="text-xs text-base-content/40">min</span>
+                        <input
+                          type="number"
+                          name="min_games"
+                          id="min-games-input"
+                          value={@min_games}
+                          min="1"
+                          placeholder="games"
+                          class="w-20 rounded-md border border-base-300 bg-base-100 px-2 py-1 text-xs text-base-content/80 placeholder-base-content/30 focus:border-primary focus:outline-none"
+                        />
+                      </form>
+                    <% end %>
                   </div>
                   <div class="flex items-center gap-1.5">
                     <span class="text-xs text-base-content/40 mr-1">Show</span>
-                    <%= for {label, n} <- [{"10", 10}, {"25", 25}, {"All", nil}] do %>
+                    <%= for {label, n} <- [{"10", 10}, {"20", 20}, {"All", nil}] do %>
                       <button
                         id={"limit-#{label}"}
                         phx-click="set_champion_limit"
