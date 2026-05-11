@@ -700,6 +700,12 @@ defmodule ReceiptsWeb.PlayerLive do
     if total > 0, do: Float.round(wins / total * 100, 1), else: 0.0
   end
 
+  defp champion_placeholder_count(champions, limit) when is_integer(limit) do
+    max(limit - length(champions), 0)
+  end
+
+  defp champion_placeholder_count(_champions, _limit), do: 0
+
   @impl true
   def render(assigns) do
     assigns =
@@ -1122,6 +1128,7 @@ defmodule ReceiptsWeb.PlayerLive do
                     <% selected_champion = Map.get(@selected_champions, selected_player.id) %>
                     <% player_result = Map.get(@player_results, selected_player.id) %>
                     <% role_stats = Map.get(@position_stats_by_player, selected_player.id, []) %>
+                    <% placeholder_count = champion_placeholder_count(player_champions, @champion_limit) %>
                     <section
                       id={"player-comparison-#{selected_player.id}"}
                       class="space-y-4 rounded-xl border border-base-300 bg-base-100/60 p-4"
@@ -1204,6 +1211,20 @@ defmodule ReceiptsWeb.PlayerLive do
                                 </span>
                               </div>
                             </button>
+                          <% end %>
+                          <%= for index <- 1..placeholder_count//1 do %>
+                            <div
+                              id={"champ-placeholder-#{selected_player.id}-#{index}"}
+                              aria-hidden="true"
+                              class="invisible pointer-events-none flex flex-col overflow-hidden rounded-xl border"
+                            >
+                              <div class="w-full aspect-square"></div>
+                              <div class="px-1.5 py-2">
+                                <div class="h-4"></div>
+                                <div class="mt-1 h-4"></div>
+                                <div class="mx-auto mt-1 h-6 w-14"></div>
+                              </div>
+                            </div>
                           <% end %>
                         </div>
                       <% end %>
