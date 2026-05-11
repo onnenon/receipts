@@ -476,7 +476,7 @@ defmodule ReceiptsWeb.PlayerLive do
   defp win_loss_analysis_error(_reason), do: "Win/loss analysis failed. Try again in a moment."
 
   defp load_comp_suggestion_cache(socket) do
-    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+    if socket.assigns.comparison? do
       history = CompSuggestion.history(socket.assigns.player_ids, comp_suggestion_opts(socket))
       fresh = Enum.find(history, & &1.fresh?)
 
@@ -489,7 +489,7 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   defp refresh_comp_suggestion_history(socket) do
-    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+    if socket.assigns.comparison? do
       assign(
         socket,
         :comp_suggestion_history,
@@ -501,7 +501,7 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   defp load_win_loss_analysis_cache(socket) do
-    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+    if socket.assigns.comparison? do
       history = WinLossAnalysis.history(socket.assigns.player_ids, win_loss_analysis_opts(socket))
       fresh = Enum.find(history, & &1.fresh?)
 
@@ -514,7 +514,7 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   defp refresh_win_loss_analysis_history(socket) do
-    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+    if socket.assigns.comparison? do
       assign(
         socket,
         :win_loss_analysis_history,
@@ -1373,7 +1373,7 @@ defmodule ReceiptsWeb.PlayerLive do
           <% end %>
         </div>
 
-        <%= if @comparison? && @admin_authenticated do %>
+        <%= if @comparison? do %>
           <section
             id="comp-suggestion-panel"
             class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm"
@@ -1394,25 +1394,27 @@ defmodule ReceiptsWeb.PlayerLive do
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 <%= if @comp_suggestion_open do %>
-                  <button
-                    id="suggest-comp-button"
-                    type="button"
-                    phx-click="suggest_comp"
-                    disabled={@comp_suggestion_loading}
-                    class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
-                  >
-                    <%= if @comp_suggestion_loading do %>
-                      <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
-                      Generating...
-                    <% else %>
-                      <.icon name="hero-sparkles-mini" class="h-4 w-4" />
-                      <%= if @comp_suggestion do %>
-                        Generate Again
+                  <%= if @admin_authenticated do %>
+                    <button
+                      id="suggest-comp-button"
+                      type="button"
+                      phx-click="suggest_comp"
+                      disabled={@comp_suggestion_loading}
+                      class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
+                    >
+                      <%= if @comp_suggestion_loading do %>
+                        <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
+                        Generating...
                       <% else %>
-                        Suggest Comp
+                        <.icon name="hero-sparkles-mini" class="h-4 w-4" />
+                        <%= if @comp_suggestion do %>
+                          Generate Again
+                        <% else %>
+                          Suggest Comp
+                        <% end %>
                       <% end %>
-                    <% end %>
-                  </button>
+                    </button>
+                  <% end %>
                 <% end %>
                 <button
                   id="toggle-comp-suggestion"
@@ -1652,7 +1654,7 @@ defmodule ReceiptsWeb.PlayerLive do
           </section>
         <% end %>
 
-        <%= if @comparison? && @admin_authenticated do %>
+        <%= if @comparison? do %>
           <section
             id="win-loss-analysis-panel"
             class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm"
@@ -1673,25 +1675,27 @@ defmodule ReceiptsWeb.PlayerLive do
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 <%= if @win_loss_analysis_open do %>
-                  <button
-                    id="analyze-win-loss-button"
-                    type="button"
-                    phx-click="analyze_win_loss"
-                    disabled={@win_loss_analysis_loading}
-                    class="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
-                  >
-                    <%= if @win_loss_analysis_loading do %>
-                      <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
-                      Analyzing...
-                    <% else %>
-                      <.icon name="hero-chart-bar-square-mini" class="h-4 w-4" />
-                      <%= if @win_loss_analysis do %>
-                        Analyze Again
+                  <%= if @admin_authenticated do %>
+                    <button
+                      id="analyze-win-loss-button"
+                      type="button"
+                      phx-click="analyze_win_loss"
+                      disabled={@win_loss_analysis_loading}
+                      class="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
+                    >
+                      <%= if @win_loss_analysis_loading do %>
+                        <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
+                        Analyzing...
                       <% else %>
-                        Analyze Games
+                        <.icon name="hero-chart-bar-square-mini" class="h-4 w-4" />
+                        <%= if @win_loss_analysis do %>
+                          Analyze Again
+                        <% else %>
+                          Analyze Games
+                        <% end %>
                       <% end %>
-                    <% end %>
-                  </button>
+                    </button>
+                  <% end %>
                 <% end %>
                 <button
                   id="toggle-win-loss-analysis"

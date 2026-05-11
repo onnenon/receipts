@@ -48,16 +48,40 @@ config :receipts, ReceiptsWeb.Endpoint,
   http: [port: String.to_integer(get_env.("PORT") || "4000")]
 
 if config_env() == :prod do
-  database_url =
-    get_env.("DATABASE_URL") ||
-      raise """
-      environment variable DATABASE_URL is missing.
-      For example: ecto://USER:PASS@HOST/DATABASE
-      """
+  database_url = get_env.("DATABASE_URL")
+  database_user = get_env.("DATABASE_USER")
+
+  repo_config =
+    cond do
+      database_url ->
+        [url: database_url]
+
+      database_user ->
+        [
+          username: database_user,
+          password:
+            get_env.("DATABASE_PASSWORD") ||
+              raise("environment variable DATABASE_PASSWORD is missing."),
+          hostname: get_env.("DATABASE_HOST") || "localhost",
+          database:
+            get_env.("DATABASE_NAME") ||
+              raise("environment variable DATABASE_NAME is missing."),
+          port: String.to_integer(get_env.("DATABASE_PORT") || "5432")
+        ]
+
+      true ->
+        raise """
+        environment variable DATABASE_URL or DATABASE_USER is missing.
+        For example: DATABASE_URL=ecto://USER:PASS@HOST/DATABASE
+        Or use discrete variables: DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME, etc.
+        """
+    end
 
   config :receipts, Receipts.Repo,
-    url: database_url,
-    pool_size: String.to_integer(get_env.("POOL_SIZE") || "10")
+    repo_config ++
+      [
+        pool_size: String.to_integer(get_env.("POOL_SIZE") || "10")
+      ]
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

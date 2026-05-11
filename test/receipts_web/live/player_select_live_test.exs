@@ -290,6 +290,58 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     assert win_loss_analysis_count(player_ids) == 2
   end
 
+  test "non-admins can see cached comp suggestion", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    create_comp_suggestion(player_ids, DateTime.utc_now(), "Cached setup for everyone.")
+
+    {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    assert has_element?(view, "#comp-suggestion-panel")
+    assert has_element?(view, "#comp-suggestion-result", "Cached setup for everyone.")
+    refute has_element?(view, "#suggest-comp-button")
+  end
+
+  test "non-admins can see cached win loss analysis", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    create_win_loss_analysis(player_ids, DateTime.utc_now(), "Cached analysis for everyone.")
+
+    {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    assert has_element?(view, "#win-loss-analysis-panel")
+    assert has_element?(view, "#win-loss-analysis-result", "Cached analysis for everyone.")
+    refute has_element?(view, "#analyze-win-loss-button")
+  end
+
+  test "non-admins can see and view history of AI analysis", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    stored_comp = create_comp_suggestion(player_ids, DateTime.add(DateTime.utc_now(), -2, :day), "Old comp.")
+    stored_analysis = create_win_loss_analysis(player_ids, DateTime.add(DateTime.utc_now(), -2, :day), "Old analysis.")
+
+    {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    # Verify history is visible and clickable
+    assert has_element?(view, "#toggle-comp-suggestion-history")
+    view |> element("#toggle-comp-suggestion-history") |> render_click()
+    assert has_element?(view, "#view-comp-suggestion-#{stored_comp.id}")
+    view |> element("#view-comp-suggestion-#{stored_comp.id}") |> render_click()
+    assert has_element?(view, "#comp-suggestion-result", "Old comp.")
+
+    assert has_element?(view, "#toggle-win-loss-analysis-history")
+    view |> element("#toggle-win-loss-analysis-history") |> render_click()
+    assert has_element?(view, "#view-win-loss-analysis-#{stored_analysis.id}")
+    view |> element("#view-win-loss-analysis-#{stored_analysis.id}") |> render_click()
+    assert has_element?(view, "#win-loss-analysis-result", "Old analysis.")
+  end
+
   defp create_player(name) do
     Player
     |> Ash.Changeset.for_create(:create, %{name: name, discord_id: unique_id()})
