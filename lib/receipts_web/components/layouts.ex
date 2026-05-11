@@ -29,7 +29,7 @@ defmodule ReceiptsWeb.Layouts do
 
   attr(:admin_authenticated, :boolean,
     default: false,
-    doc: "whether the current session can access admin views"
+    doc: "whether the current session can access protected views"
   )
 
   attr(:current_scope, :map,
@@ -50,14 +50,27 @@ defmodule ReceiptsWeb.Layouts do
           Receipts
         </a>
         <nav class="flex items-center gap-2 overflow-x-auto">
-          <a
+          <.link
+            navigate={~p"/players"}
+            class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
+          >
+            Receipts
+          </.link>
+          <.link
             :if={@admin_authenticated}
-            href="/admin/players"
+            navigate={~p"/admin/players"}
             class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
           >
             Admin
+          </.link>
+          <a
+            :if={!@admin_authenticated}
+            href="/login"
+            class="inline-flex items-center gap-2 rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm font-semibold text-base-content shadow-sm transition hover:border-primary/40 hover:bg-base-300"
+          >
+            <.icon name="hero-lock-closed-mini" class="size-4" />
+            Login
           </a>
-          <.theme_toggle />
         </nav>
       </div>
     </header>
@@ -65,6 +78,14 @@ defmodule ReceiptsWeb.Layouts do
     <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       {render_slot(@inner_block)}
     </main>
+
+    <footer class="mx-auto flex max-w-6xl flex-col gap-4 border-t border-base-300 px-4 py-6 text-sm text-base-content/55 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <p>Private League stats for Discord receipts.</p>
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-semibold uppercase tracking-wide text-base-content/40">Theme</span>
+        <.theme_toggle />
+      </div>
+    </footer>
 
     <.flash_group flash={@flash} />
     """

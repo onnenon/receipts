@@ -75,7 +75,7 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
       <div class="space-y-6">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Admin</p>
+            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Roster</p>
             <h1 class="mt-1 text-3xl font-bold tracking-tight">Players</h1>
             <p class="mt-1 text-sm text-base-content/55">
               Link Discord friends to every Riot account they play on.

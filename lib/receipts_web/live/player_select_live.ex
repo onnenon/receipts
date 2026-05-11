@@ -35,8 +35,11 @@ defmodule ReceiptsWeb.PlayerSelectLive do
       [] ->
         {:noreply, put_flash(socket, :error, "Select at least one player.")}
 
+      [id] ->
+        {:noreply, push_navigate(socket, to: ~p"/players/#{id}")}
+
       ids ->
-        {:noreply, push_navigate(socket, to: ~p"/players?ids=#{Enum.join(ids, ",")}")}
+        {:noreply, push_navigate(socket, to: ~p"/players/compare?ids=#{Enum.join(ids, ",")}")}
     end
   end
 
@@ -112,7 +115,7 @@ defmodule ReceiptsWeb.PlayerSelectLive do
               navigate={~p"/admin/players"}
               class="mt-2 inline-block text-sm text-primary hover:underline"
             >
-              Add players in Admin
+              Add players
             </.link>
           </div>
         <% else %>

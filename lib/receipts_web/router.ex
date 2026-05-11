@@ -18,16 +18,18 @@ defmodule ReceiptsWeb.Router do
   scope "/", ReceiptsWeb do
     pipe_through(:browser)
 
+    get("/", PageController, :home)
+    get("/receipts", PageController, :receipts)
+
     get("/login", AdminSessionController, :new)
     post("/login", AdminSessionController, :create)
     get("/admin/login", AdminSessionController, :new)
     post("/admin/login", AdminSessionController, :create)
 
     live_session :default, on_mount: {ReceiptsWeb.AdminAuth, :assign_admin_authenticated} do
-      live("/", PlayerSelectLive, :index)
-      live("/players", PlayerLive, :show)
+      live("/players", PlayerSelectLive, :index)
+      live("/players/compare", PlayerLive, :show)
       live("/players/:id", PlayerLive, :show)
-      live("/receipts", ReceiptsLive, :index)
     end
 
     live_session :admin, on_mount: {ReceiptsWeb.AdminAuth, :ensure_authenticated} do

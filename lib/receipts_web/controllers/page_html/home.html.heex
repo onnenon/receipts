@@ -1,104 +1,70 @@
 <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
   <section class="overflow-hidden rounded-2xl border border-base-300 bg-base-200">
-    <div class="grid min-h-[520px] lg:grid-cols-[1.1fr_0.9fr]">
-      <div class="flex flex-col justify-between p-6 sm:p-10 lg:p-12">
-        <div>
-          <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">
-            <.icon name="hero-command-line-mini" class="h-4 w-4" />
-            Discord receipts for League nights
-          </div>
+    <div class="relative min-h-[560px]">
+      <img
+        src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yasuo_0.jpg"
+        alt=""
+        class="absolute inset-0 h-full w-full object-cover object-center"
+      />
+      <div class="absolute inset-0 bg-gradient-to-r from-base-100 via-base-100/82 to-base-100/28" />
+      <div class="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-base-100/85 to-transparent" />
 
-          <h1 class="mt-8 max-w-3xl text-4xl font-bold tracking-tight text-base-content sm:text-6xl">
-            Prove the pick before the loading screen does.
-          </h1>
-          <p class="mt-5 max-w-2xl text-base leading-7 text-base-content/65 sm:text-lg">
-            Receipts keeps champion stats across every linked Riot account, then turns them
-            into fast answers for Discord commands and local browsing.
-          </p>
+      <div class="relative flex min-h-[560px] max-w-3xl flex-col justify-center px-6 py-12 sm:px-10 lg:px-12">
+        <div class="inline-flex w-fit items-center gap-2 rounded-full border border-primary/25 bg-primary/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">
+          <.icon name="hero-command-line-mini" class="h-4 w-4" />
+          Discord receipts for League nights
         </div>
 
-        <div class="mt-10 flex flex-col gap-3 sm:flex-row">
+        <h1 class="mt-8 text-5xl font-black tracking-tight text-base-content sm:text-7xl">
+          Receipts
+        </h1>
+        <p class="mt-5 max-w-2xl text-lg leading-8 text-base-content/72">
+          Pull champion stats across every linked Riot account before someone locks in a pick
+          they have no business playing.
+        </p>
+
+        <div class="mt-8 flex flex-col gap-3 sm:flex-row">
           <.link
-            navigate={~p"/receipts"}
-            class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-primary-content shadow-sm transition hover:opacity-90"
+            navigate={~p"/players"}
+            class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm font-bold text-primary-content shadow-sm transition hover:-translate-y-0.5 hover:opacity-90"
           >
-            Check Receipts
+            Browse Receipts
             <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
           </.link>
-          <.link
-            navigate={~p"/admin/players"}
-            class="inline-flex items-center justify-center gap-2 rounded-lg border border-base-300 bg-base-100 px-5 py-3 text-sm font-semibold text-base-content transition hover:border-base-content/20 hover:bg-base-300/60"
-          >
-            Manage Players
-          </.link>
         </div>
       </div>
+    </div>
+  </section>
 
-      <div class="border-t border-base-300 bg-base-100 p-5 lg:border-l lg:border-t-0">
-        <div class="grid h-full content-center gap-4">
-          <div class="rounded-xl border border-base-300 bg-base-200 p-5 shadow-sm">
-            <div class="flex items-start justify-between gap-4">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">
-                  /receipts koozie yasuo
-                </p>
-                <h2 class="mt-2 text-2xl font-bold">Yasuo audit</h2>
-              </div>
-              <span class="rounded-full bg-error/15 px-3 py-1 text-xs font-bold text-error">
-                42% WR
-              </span>
-            </div>
-
-            <div class="mt-6 grid grid-cols-3 gap-3">
-              <div class="rounded-lg bg-base-100 p-3">
-                <p class="text-2xl font-bold">38</p>
-                <p class="mt-1 text-xs text-base-content/50">games</p>
-              </div>
-              <div class="rounded-lg bg-base-100 p-3">
-                <p class="text-2xl font-bold">6.1</p>
-                <p class="mt-1 text-xs text-base-content/50">avg kills</p>
-              </div>
-              <div class="rounded-lg bg-base-100 p-3">
-                <p class="text-2xl font-bold">1.8</p>
-                <p class="mt-1 text-xs text-base-content/50">KDA</p>
-              </div>
-            </div>
-
-            <div class="mt-5 space-y-2">
-              <div class="flex items-center justify-between rounded-lg bg-base-100 px-3 py-2 text-sm">
-                <span class="font-semibold text-success">WIN</span>
-                <span class="text-base-content/65">9 / 4 / 11 · 228 CS</span>
-              </div>
-              <div class="flex items-center justify-between rounded-lg bg-base-100 px-3 py-2 text-sm">
-                <span class="font-semibold text-error">LOSS</span>
-                <span class="text-base-content/65">3 / 9 / 5 · 171 CS</span>
-              </div>
-              <div class="flex items-center justify-between rounded-lg bg-base-100 px-3 py-2 text-sm">
-                <span class="font-semibold text-error">LOSS</span>
-                <span class="text-base-content/65">5 / 10 / 6 · 190 CS</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="grid gap-4 sm:grid-cols-3">
-            <div class="rounded-xl border border-base-300 bg-base-200 p-4">
-              <.icon name="hero-users-mini" class="h-5 w-5 text-primary" />
-              <p class="mt-3 text-sm font-semibold">Players</p>
-              <p class="mt-1 text-xs leading-5 text-base-content/55">Group members with Discord IDs.</p>
-            </div>
-            <div class="rounded-xl border border-base-300 bg-base-200 p-4">
-              <.icon name="hero-link-mini" class="h-5 w-5 text-primary" />
-              <p class="mt-3 text-sm font-semibold">Accounts</p>
-              <p class="mt-1 text-xs leading-5 text-base-content/55">Multiple Riot IDs roll up cleanly.</p>
-            </div>
-            <div class="rounded-xl border border-base-300 bg-base-200 p-4">
-              <.icon name="hero-circle-stack-mini" class="h-5 w-5 text-primary" />
-              <p class="mt-3 text-sm font-semibold">Cache</p>
-              <p class="mt-1 text-xs leading-5 text-base-content/55">Incremental match history sync.</p>
-            </div>
-          </div>
-        </div>
+  <section class="mt-8 grid gap-4 md:grid-cols-3">
+    <div class="rounded-lg border border-base-300 bg-base-200 p-5">
+      <div class="grid h-10 w-10 place-items-center rounded-lg bg-primary/15 text-primary">
+        <.icon name="hero-users-mini" class="h-5 w-5" />
       </div>
+      <h2 class="mt-4 text-lg font-bold">Pick the players</h2>
+      <p class="mt-2 text-sm leading-6 text-base-content/58">
+        Start from the group roster, select one player, or compare the shared games for a whole lobby.
+      </p>
+    </div>
+
+    <div class="rounded-lg border border-base-300 bg-base-200 p-5">
+      <div class="grid h-10 w-10 place-items-center rounded-lg bg-secondary/15 text-secondary">
+        <.icon name="hero-chart-bar-square-mini" class="h-5 w-5" />
+      </div>
+      <h2 class="mt-4 text-lg font-bold">Audit the champion</h2>
+      <p class="mt-2 text-sm leading-6 text-base-content/58">
+        See win rate, KDA, recent games, queue filters, lane filters, and champion-specific history.
+      </p>
+    </div>
+
+    <div class="rounded-lg border border-base-300 bg-base-200 p-5">
+      <div class="grid h-10 w-10 place-items-center rounded-lg bg-accent/15 text-accent">
+        <.icon name="hero-sparkles-mini" class="h-5 w-5" />
+      </div>
+      <h2 class="mt-4 text-lg font-bold">Get AI analysis</h2>
+      <p class="mt-2 text-sm leading-6 text-base-content/58">
+        Generate champion summaries, comp suggestions, and win-loss analysis from the latest group data.
+      </p>
     </div>
   </section>
 </Layouts.app>

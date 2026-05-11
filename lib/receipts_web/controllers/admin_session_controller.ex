@@ -3,7 +3,7 @@ defmodule ReceiptsWeb.AdminSessionController do
 
   alias ReceiptsWeb.AdminAuth
 
-  @default_return_to "/admin/players"
+  @default_return_to "/players"
 
   def new(conn, params) do
     if AdminAuth.authenticated_conn?(conn) do
@@ -23,14 +23,14 @@ defmodule ReceiptsWeb.AdminSessionController do
       |> redirect(to: return_to)
     else
       conn
-      |> put_flash(:error, "Invalid admin password.")
+      |> put_flash(:error, "Invalid password.")
       |> render(:new, return_to: return_to)
     end
   end
 
   def create(conn, _params) do
     conn
-    |> put_flash(:error, "Invalid admin password.")
+    |> put_flash(:error, "Invalid password.")
     |> render(:new, return_to: @default_return_to)
   end
 

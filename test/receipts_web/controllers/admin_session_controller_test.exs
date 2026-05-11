@@ -10,7 +10,7 @@ defmodule ReceiptsWeb.AdminSessionControllerTest do
   test "logs in with the admin password and protects admin live views", %{conn: conn} do
     conn = log_in_admin(conn)
 
-    assert redirected_to(conn) == "/admin/players"
+    assert redirected_to(conn) == "/players"
 
     {:ok, view, _html} = live(conn, ~p"/admin/players")
     assert has_element?(view, "#players")

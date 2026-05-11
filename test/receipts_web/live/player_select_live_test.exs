@@ -20,7 +20,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     player_a = create_player("Koozie")
     player_b = create_player("Kupo")
 
-    {:ok, view, _html} = live(conn, ~p"/")
+    {:ok, view, _html} = live(conn, ~p"/players")
 
     assert has_element?(view, "#player-selection-form")
     assert has_element?(view, "#player-tile-#{player_a.id}")
@@ -31,7 +31,19 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     |> render_submit()
 
     player_ids = "#{player_a.id},#{player_b.id}"
-    assert_redirect(view, ~p"/players?ids=#{player_ids}")
+    assert_redirect(view, ~p"/players/compare?ids=#{player_ids}")
+  end
+
+  test "selects one player before navigating to the player route", %{conn: conn} do
+    player = create_player("Koozie")
+
+    {:ok, view, _html} = live(conn, ~p"/players")
+
+    view
+    |> form("#player-selection-form", %{"player_ids" => [player.id]})
+    |> render_submit()
+
+    assert_redirect(view, ~p"/players/#{player.id}")
   end
 
   test "comparison page shows per-player result columns from shared games only", %{conn: conn} do
@@ -50,7 +62,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     create_participant(account_a, solo_match, ahri, true, kills: 20)
 
     player_ids = "#{player_a.id},#{player_b.id}"
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{player_ids}")
 
     assert has_element?(view, "#player-comparison-#{player_a.id}", "Koozie")
     assert has_element?(view, "#player-comparison-#{player_b.id}", "Kupo")
@@ -92,7 +104,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     create_participant(account_c, flex_match, ahri, true, kills: 2)
 
     player_ids = Enum.join([player_a.id, player_b.id, player_c.id], ",")
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{player_ids}")
 
     assert has_element?(view, "#queue-toggle-ranked_solo[disabled]")
     refute has_element?(view, "#queue-toggle-ranked_flex[disabled]")
@@ -109,11 +121,11 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     player_ids = "#{player_a.id},#{player_b.id}"
 
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{player_ids}")
     refute has_element?(view, "#suggest-comp-button")
 
     admin_conn = log_in_admin(conn)
-    {:ok, admin_view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
+    {:ok, admin_view, _html} = live(admin_conn, ~p"/players/compare?ids=#{player_ids}")
     assert has_element?(admin_view, "#suggest-comp-button")
 
     html = admin_view |> element("#suggest-comp-button") |> render_click()
@@ -147,7 +159,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     create_comp_suggestion(player_ids, DateTime.utc_now(), "Cached setup is still fresh.")
 
     admin_conn = log_in_admin(conn)
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     assert has_element?(view, "#comp-suggestion-cache-date", "Cached suggestion generated")
     assert has_element?(view, "#comp-suggestion-result", "Cached setup is still fresh.")
@@ -167,7 +179,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
       )
 
     admin_conn = log_in_admin(conn)
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     refute has_element?(view, "#comp-suggestion-result")
     assert has_element?(view, "#toggle-comp-suggestion-history", "History")
@@ -195,7 +207,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     create_comp_suggestion(player_ids, DateTime.utc_now(), "Cached setup is still fresh.")
 
     admin_conn = log_in_admin(conn)
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     view |> element("#suggest-comp-button") |> render_click()
     render_async(view)
@@ -210,11 +222,11 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     player_ids = "#{player_a.id},#{player_b.id}"
 
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{player_ids}")
     refute has_element?(view, "#analyze-win-loss-button")
 
     admin_conn = log_in_admin(conn)
-    {:ok, admin_view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
+    {:ok, admin_view, _html} = live(admin_conn, ~p"/players/compare?ids=#{player_ids}")
     assert has_element?(admin_view, "#analyze-win-loss-button")
     assert has_element?(admin_view, "#analyze-win-loss-button", "Analyze Games")
     assert has_element?(admin_view, "#toggle-win-loss-analysis")
@@ -239,7 +251,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     admin_conn = log_in_admin(conn)
     player_ids = "#{player_a.id},#{player_b.id}"
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{player_ids}")
 
     assert has_element?(view, "#suggest-comp-button")
     assert has_element?(view, "#analyze-win-loss-button")
@@ -267,7 +279,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     create_win_loss_analysis(player_ids, DateTime.utc_now(), "Cached loss read is still fresh.")
 
     admin_conn = log_in_admin(conn)
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     assert has_element?(view, "#win-loss-analysis-cache-date", "Cached analysis generated")
     assert has_element?(view, "#win-loss-analysis-result", "Cached loss read is still fresh.")
@@ -287,7 +299,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
       )
 
     admin_conn = log_in_admin(conn)
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     refute has_element?(view, "#win-loss-analysis-result")
     assert has_element?(view, "#toggle-win-loss-analysis-history", "History")
@@ -319,7 +331,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     create_win_loss_analysis(player_ids, DateTime.utc_now(), "Cached loss read is still fresh.")
 
     admin_conn = log_in_admin(conn)
-    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(admin_conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     view |> element("#analyze-win-loss-button") |> render_click()
     render_async(view)
@@ -335,7 +347,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     create_comp_suggestion(player_ids, DateTime.utc_now(), "Cached setup for everyone.")
 
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     assert has_element?(view, "#comp-suggestion-panel")
     assert has_element?(view, "#comp-suggestion-result", "Cached setup for everyone.")
@@ -349,7 +361,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     create_win_loss_analysis(player_ids, DateTime.utc_now(), "Cached analysis for everyone.")
 
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     assert has_element?(view, "#win-loss-analysis-panel")
     assert has_element?(view, "#win-loss-analysis-result", "Cached analysis for everyone.")
@@ -371,7 +383,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
         "Old analysis."
       )
 
-    {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+    {:ok, view, _html} = live(conn, ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}")
 
     # Verify history is visible and clickable
     assert has_element?(view, "#toggle-comp-suggestion-history")

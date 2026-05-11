@@ -18,7 +18,7 @@ defmodule ReceiptsWeb.PlayerLive do
 
     case players do
       [] ->
-        {:ok, push_navigate(socket, to: ~p"/")}
+        {:ok, push_navigate(socket, to: ~p"/players")}
 
       [player | _] ->
         player_ids = Enum.map(players, & &1.id)
@@ -797,7 +797,7 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   defp player_path(%{comparison?: true, player_ids: player_ids}, champion_key) do
-    ~p"/players?ids=#{Enum.join(player_ids, ",")}&champion=#{champion_key}"
+    ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}&champion=#{champion_key}"
   end
 
   defp player_path(%{player: player}, champion_key),
