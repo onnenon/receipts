@@ -1435,7 +1435,7 @@ defmodule ReceiptsWeb.PlayerLive do
                    <%= if @admin_authenticated do %>
                      <.link
                        id="toggle-comp-prompt-lab"
-                       navigate={comp_prompt_lab_path(assigns)}
+                       href={comp_prompt_lab_path(assigns)}
                        class="inline-flex items-center justify-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-bold text-base-content/65 shadow-sm transition hover:border-base-content/20 hover:text-base-content"
                      >
                        <.icon name="hero-beaker-mini" class="h-4 w-4" />
@@ -1603,7 +1603,7 @@ defmodule ReceiptsWeb.PlayerLive do
                   <%= if @admin_authenticated do %>
                     <.link
                       id="toggle-win-loss-prompt-lab"
-                      navigate={win_loss_prompt_lab_path(assigns)}
+                      href={win_loss_prompt_lab_path(assigns)}
                       class="inline-flex items-center justify-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-bold text-base-content/65 shadow-sm transition hover:border-base-content/20 hover:text-base-content"
                     >
                       <.icon name="hero-beaker-mini" class="h-4 w-4" />
