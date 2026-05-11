@@ -23,6 +23,88 @@ defmodule Receipts.LoL.Queries do
     end
   end
 
+  def player_home_stats(players) do
+    player_ids = Enum.map(players, & &1.id)
+
+    accounts =
+      Account
+      |> Ash.Query.filter(player_id in ^player_ids)
+      |> Ash.read!()
+
+    account_player_ids = Map.new(accounts, &{&1.id, &1.player_id})
+    account_ids = Map.keys(account_player_ids)
+    accounts_by_player = Enum.group_by(accounts, & &1.player_id)
+
+    participants =
+      if account_ids == [] do
+        []
+      else
+        MatchParticipant
+        |> Ash.Query.filter(account_id in ^account_ids)
+        |> Ash.Query.load(:champion)
+        |> Ash.read!()
+      end
+
+    participants_by_player =
+      Enum.group_by(participants, fn p -> Map.fetch!(account_player_ids, p.account_id) end)
+
+    Map.new(player_ids, fn player_id ->
+      player_participants = Map.get(participants_by_player, player_id, [])
+
+      total_games = length(player_participants)
+      total_wins = Enum.count(player_participants, & &1.win)
+
+      overall_win_rate =
+        if total_games > 0, do: Float.round(total_wins / total_games * 100, 1), else: 0.0
+
+      top_champion =
+        player_participants
+        |> Enum.group_by(& &1.champion_id)
+        |> Enum.map(fn {_, parts} ->
+          games = length(parts)
+          wins = Enum.count(parts, & &1.win)
+          wr = if games > 0, do: Float.round(wins / games * 100, 1), else: 0.0
+
+          %{
+            champion: hd(parts).champion,
+            games_played: games,
+            wins: wins,
+            win_rate: wr
+          }
+        end)
+        |> Enum.sort_by(&{-&1.games_played, &1.champion.name})
+        |> List.first()
+
+      player_accounts = Map.get(accounts_by_player, player_id, [])
+
+      {player_id,
+       %{
+         top_champion: top_champion,
+         total_games: total_games,
+         total_wins: total_wins,
+         overall_win_rate: overall_win_rate,
+         best_rank: best_rank_for_accounts(player_accounts)
+       }}
+    end)
+  end
+
+  @tier_order ~w(IRON BRONZE SILVER GOLD PLATINUM EMERALD DIAMOND MASTER GRANDMASTER CHALLENGER)
+
+  defp best_rank_for_accounts(accounts) do
+    ranked = Enum.filter(accounts, & &1.rank_tier)
+
+    if ranked == [] do
+      nil
+    else
+      best =
+        Enum.max_by(ranked, fn a ->
+          Enum.find_index(@tier_order, &(&1 == a.rank_tier)) || -1
+        end)
+
+      %{tier: best.rank_tier, division: best.rank_division, lp: best.rank_lp}
+    end
+  end
+
   def player_top_champions(players) do
     player_ids = Enum.map(players, & &1.id)
 
