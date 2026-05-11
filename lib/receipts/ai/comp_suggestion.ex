@@ -1,9 +1,12 @@
 defmodule Receipts.AI.CompSuggestion do
   @moduledoc false
 
-  alias Receipts.LoL.Queries
+  require Ash.Query
+
+  alias Receipts.LoL.{CompSuggestionCache, Queries, Queue}
 
   @positions ~w(TOP JUNGLE MIDDLE BOTTOM UTILITY)
+  @cache_ttl_seconds 86_400
 
   def suggest(player_ids, opts \\ []) do
     with {:ok, context} <- Queries.comp_suggestion_context_for_players(player_ids, opts),
@@ -11,6 +14,113 @@ defmodule Receipts.AI.CompSuggestion do
            ai_client().generate_structured(prompt(context), response_schema(), ai_opts()) do
       {:ok, normalize_response(response, context)}
     end
+  end
+
+  def fetch_or_generate(player_ids, opts \\ []) do
+    force? = Keyword.get(opts, :force, false)
+
+    case {force?, cached_record(player_ids, opts)} do
+      {false, %CompSuggestionCache{} = record} ->
+        {:ok, suggestion_result(record, cached?: true)}
+
+      _ ->
+        generate_and_store(player_ids, opts)
+    end
+  end
+
+  def history(player_ids, opts \\ []) do
+    player_ids
+    |> cache_key(opts)
+    |> history_records()
+    |> Enum.map(&suggestion_result(&1, cached?: fresh?(&1)))
+  end
+
+  def cache_key(player_ids, opts \\ []) do
+    %{
+      "player_ids" => player_ids |> normalize_player_ids() |> Enum.sort(),
+      "filters" => cache_filters(opts)
+    }
+    |> Jason.encode!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  def cache_filters(opts \\ []) do
+    queue_types =
+      opts
+      |> Keyword.get(:queue_types, Queue.default_queues())
+      |> Enum.map(&to_string/1)
+      |> Enum.sort()
+
+    %{
+      "queue_types" => queue_types,
+      "from_year" => Keyword.get(opts, :from_year),
+      "to_year" => Keyword.get(opts, :to_year)
+    }
+  end
+
+  def fresh?(%CompSuggestionCache{generated_at: %DateTime{} = generated_at}) do
+    DateTime.diff(DateTime.utc_now(), generated_at, :second) < @cache_ttl_seconds
+  end
+
+  def fresh?(_record), do: false
+
+  defp generate_and_store(player_ids, opts) do
+    opts = Keyword.delete(opts, :force)
+
+    with {:ok, suggestion} <- suggest(player_ids, opts),
+         {:ok, record} <- store_suggestion(player_ids, opts, suggestion) do
+      {:ok, suggestion_result(record, cached?: false)}
+    end
+  end
+
+  defp cached_record(player_ids, opts) do
+    player_ids
+    |> cache_key(opts)
+    |> history_records(1)
+    |> Enum.find(&fresh?/1)
+  end
+
+  defp history_records(cache_key, limit \\ nil) do
+    CompSuggestionCache
+    |> Ash.Query.filter(cache_key == ^cache_key)
+    |> Ash.Query.sort(generated_at: :desc)
+    |> maybe_limit(limit)
+    |> Ash.read!()
+  end
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, limit), do: Ash.Query.limit(query, limit)
+
+  defp store_suggestion(player_ids, opts, suggestion) do
+    CompSuggestionCache
+    |> Ash.Changeset.for_create(:create, %{
+      cache_key: cache_key(player_ids, opts),
+      player_ids: normalize_player_ids(player_ids),
+      filters: cache_filters(opts),
+      suggestion: suggestion,
+      generated_at: DateTime.utc_now()
+    })
+    |> Ash.create()
+  end
+
+  defp suggestion_result(record, opts) do
+    cached? = Keyword.fetch!(opts, :cached?)
+
+    %{
+      id: record.id,
+      suggestion: record.suggestion,
+      generated_at: record.generated_at,
+      cached?: cached?,
+      fresh?: fresh?(record)
+    }
+  end
+
+  defp normalize_player_ids(player_ids) do
+    player_ids
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
   end
 
   defp ai_client do

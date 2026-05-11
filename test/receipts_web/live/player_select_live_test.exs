@@ -1,7 +1,10 @@
 defmodule ReceiptsWeb.PlayerSelectLiveTest do
   use ReceiptsWeb.ConnCase
 
-  alias Receipts.LoL.{Account, Champion, Match, MatchParticipant, Player}
+  require Ash.Query
+
+  alias Receipts.AI.CompSuggestion, as: CompSuggestionService
+  alias Receipts.LoL.{Account, Champion, CompSuggestionCache, Match, MatchParticipant, Player}
 
   test "selects multiple players before navigating to receipts", %{conn: conn} do
     player_a = create_player("Koozie")
@@ -80,6 +83,64 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     refute has_element?(admin_view, "#comp-suggestion-result", "recent_non_shared_positions")
   end
 
+  test "admin comparison page loads a fresh cached comp suggestion", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    create_comp_suggestion(player_ids, DateTime.utc_now(), "Cached setup is still fresh.")
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    assert has_element?(view, "#comp-suggestion-cache-date", "Cached suggestion generated")
+    assert has_element?(view, "#comp-suggestion-result", "Cached setup is still fresh.")
+    assert has_element?(view, "#suggest-comp-button", "Generate Again")
+  end
+
+  test "older comp suggestions remain viewable from history", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    stored =
+      create_comp_suggestion(
+        player_ids,
+        DateTime.add(DateTime.utc_now(), -2, :day),
+        "Old setup can still be inspected."
+      )
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    refute has_element?(view, "#comp-suggestion-result")
+    assert has_element?(view, "#comp-suggestion-history")
+
+    view
+    |> element("#view-comp-suggestion-#{stored.id}")
+    |> render_click()
+
+    assert has_element?(view, "#comp-suggestion-result", "Old setup can still be inspected.")
+    refute has_element?(view, "#comp-suggestion-cache-date")
+  end
+
+  test "generating again stores another comp suggestion record", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    create_comp_suggestion(player_ids, DateTime.utc_now(), "Cached setup is still fresh.")
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
+
+    view |> element("#suggest-comp-button") |> render_click()
+    render_async(view)
+
+    assert has_element?(view, "#comp-suggestion-result", "Koozie should play mid")
+    assert comp_suggestion_count(player_ids) == 2
+  end
+
   defp create_player(name) do
     Player
     |> Ash.Changeset.for_create(:create, %{name: name, discord_id: unique_id()})
@@ -143,6 +204,33 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
       raw_participant: %{}
     })
     |> Ash.create!()
+  end
+
+  defp create_comp_suggestion(player_ids, generated_at, summary) do
+    CompSuggestionCache
+    |> Ash.Changeset.for_create(:create, %{
+      cache_key: CompSuggestionService.cache_key(player_ids),
+      player_ids: player_ids,
+      filters: CompSuggestionService.cache_filters(),
+      generated_at: generated_at,
+      suggestion: %{
+        "summary" => summary,
+        "confidence" => "medium",
+        "recommended_lineup" => [],
+        "alternatives" => [],
+        "caveats" => []
+      }
+    })
+    |> Ash.create!()
+  end
+
+  defp comp_suggestion_count(player_ids) do
+    cache_key = CompSuggestionService.cache_key(player_ids)
+
+    CompSuggestionCache
+    |> Ash.Query.filter(cache_key == ^cache_key)
+    |> Ash.read!()
+    |> length()
   end
 
   defp unique_id, do: System.unique_integer([:positive]) |> Integer.to_string()

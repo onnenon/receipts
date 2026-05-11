@@ -98,9 +98,14 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:results, [])
          |> assign(:player_results, %{})
          |> assign(:comp_suggestion, nil)
+         |> assign(:comp_suggestion_record_id, nil)
+         |> assign(:comp_suggestion_generated_at, nil)
+         |> assign(:comp_suggestion_cached, false)
+         |> assign(:comp_suggestion_history, [])
          |> assign(:comp_suggestion_error, nil)
          |> assign(:comp_suggestion_loading, false)
-         |> assign(:recent_queue_filter, nil)}
+         |> assign(:recent_queue_filter, nil)
+         |> load_comp_suggestion_cache()}
     end
   end
 
@@ -274,15 +279,15 @@ defmodule ReceiptsWeb.PlayerLive do
       queue_types: MapSet.to_list(enabled_queues),
       from_year: from_year,
       to_year: to_year,
-      match_ids: shared_match_ids
+      match_ids: shared_match_ids,
+      force: true
     ]
 
     {:noreply,
      socket
-     |> assign(:comp_suggestion, nil)
      |> assign(:comp_suggestion_error, nil)
      |> assign(:comp_suggestion_loading, true)
-     |> start_async(:comp_suggestion, fn -> CompSuggestion.suggest(player_ids, opts) end)}
+     |> start_async(:comp_suggestion, fn -> CompSuggestion.fetch_or_generate(player_ids, opts) end)}
   end
 
   def handle_event("suggest_comp", _params, socket) do
@@ -290,10 +295,25 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   @impl true
+  def handle_event("view_comp_suggestion", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.comp_suggestion_history, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      suggestion ->
+        {:noreply,
+         socket
+         |> assign_comp_suggestion(suggestion)
+         |> assign(:comp_suggestion_error, nil)}
+    end
+  end
+
+  @impl true
   def handle_async(:comp_suggestion, {:ok, {:ok, suggestion}}, socket) do
     {:noreply,
      socket
-     |> assign(:comp_suggestion, suggestion)
+     |> assign_comp_suggestion(suggestion)
+     |> refresh_comp_suggestion_history()
      |> assign(:comp_suggestion_error, nil)
      |> assign(:comp_suggestion_loading, false)}
   end
@@ -303,7 +323,6 @@ defmodule ReceiptsWeb.PlayerLive do
 
     {:noreply,
      socket
-     |> assign(:comp_suggestion, nil)
      |> assign(:comp_suggestion_error, comp_suggestion_error(reason))
      |> assign(:comp_suggestion_loading, false)}
   end
@@ -313,7 +332,6 @@ defmodule ReceiptsWeb.PlayerLive do
 
     {:noreply,
      socket
-     |> assign(:comp_suggestion, nil)
      |> assign(:comp_suggestion_error, comp_suggestion_error(:unknown))
      |> assign(:comp_suggestion_loading, false)}
   end
@@ -327,6 +345,63 @@ defmodule ReceiptsWeb.PlayerLive do
     do: "Gemini timed out while generating the comp suggestion. Try again in a moment."
 
   defp comp_suggestion_error(_reason), do: "Comp suggestion failed. Try again in a moment."
+
+  defp load_comp_suggestion_cache(socket) do
+    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+      history = CompSuggestion.history(socket.assigns.player_ids, comp_suggestion_opts(socket))
+      fresh = Enum.find(history, & &1.fresh?)
+
+      socket
+      |> assign(:comp_suggestion_history, history)
+      |> assign_comp_suggestion(fresh)
+    else
+      socket
+    end
+  end
+
+  defp refresh_comp_suggestion_history(socket) do
+    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+      assign(
+        socket,
+        :comp_suggestion_history,
+        CompSuggestion.history(socket.assigns.player_ids, comp_suggestion_opts(socket))
+      )
+    else
+      socket
+    end
+  end
+
+  defp assign_comp_suggestion(socket, nil) do
+    socket
+    |> assign(:comp_suggestion, nil)
+    |> assign(:comp_suggestion_record_id, nil)
+    |> assign(:comp_suggestion_generated_at, nil)
+    |> assign(:comp_suggestion_cached, false)
+  end
+
+  defp assign_comp_suggestion(socket, suggestion) do
+    socket
+    |> assign(:comp_suggestion, suggestion.suggestion)
+    |> assign(:comp_suggestion_record_id, suggestion.id)
+    |> assign(:comp_suggestion_generated_at, suggestion.generated_at)
+    |> assign(:comp_suggestion_cached, suggestion.cached?)
+  end
+
+  defp comp_suggestion_opts(socket) do
+    %{
+      shared_match_ids: shared_match_ids,
+      enabled_queues: enabled_queues,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    [
+      queue_types: MapSet.to_list(enabled_queues),
+      from_year: from_year,
+      to_year: to_year,
+      match_ids: shared_match_ids
+    ]
+  end
 
   defp maybe_rerun(socket) do
     socket = refresh_top_champions(socket)
@@ -420,9 +495,12 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:top_champions_by_player, top_champions_by_player)
     |> assign(:position_stats_by_player, position_stats_by_player)
     |> assign(:player_position_stats, player_position_stats)
-    |> assign(:comp_suggestion, nil)
+    |> assign(:comp_suggestion_record_id, nil)
+    |> assign(:comp_suggestion_generated_at, nil)
+    |> assign(:comp_suggestion_cached, false)
     |> assign(:comp_suggestion_error, nil)
     |> assign(:comp_suggestion_loading, false)
+    |> load_comp_suggestion_cache()
   end
 
   defp run_query(socket) do
@@ -770,6 +848,12 @@ defmodule ReceiptsWeb.PlayerLive do
   defp format_date(nil), do: "—"
   defp format_date(%DateTime{} = dt), do: "#{dt.month}/#{dt.day}/#{dt.year}"
 
+  defp format_datetime(nil), do: "—"
+
+  defp format_datetime(%DateTime{} = dt) do
+    Calendar.strftime(dt, "%b %-d, %Y at %-I:%M %p UTC")
+  end
+
   defp year_options do
     for year <- @earliest_year..@current_year//1, do: {to_string(year), year}
   end
@@ -1101,6 +1185,11 @@ defmodule ReceiptsWeb.PlayerLive do
                 <p class="text-xs text-base-content/40">
                   Based on the current shared-game filters and recent individual games.
                 </p>
+                <%= if @comp_suggestion_cached && @comp_suggestion_generated_at do %>
+                  <p id="comp-suggestion-cache-date" class="mt-1 text-xs font-medium text-primary">
+                    Cached suggestion generated {format_datetime(@comp_suggestion_generated_at)}.
+                  </p>
+                <% end %>
               </div>
               <button
                 id="suggest-comp-button"
@@ -1114,7 +1203,11 @@ defmodule ReceiptsWeb.PlayerLive do
                   Generating...
                 <% else %>
                   <.icon name="hero-sparkles-mini" class="h-4 w-4" />
-                  Suggest Comp
+                  <%= if @comp_suggestion do %>
+                    Generate Again
+                  <% else %>
+                    Suggest Comp
+                  <% end %>
                 <% end %>
               </button>
             </div>
@@ -1138,12 +1231,58 @@ defmodule ReceiptsWeb.PlayerLive do
               </div>
             <% end %>
 
+            <%= if @comp_suggestion_history != [] do %>
+              <div
+                id="comp-suggestion-history"
+                class="grid gap-2 border-t border-base-300 px-4 py-3 md:grid-cols-2 xl:grid-cols-3"
+              >
+                <%= for stored <- @comp_suggestion_history do %>
+                  <button
+                    id={"view-comp-suggestion-#{stored.id}"}
+                    type="button"
+                    phx-click="view_comp_suggestion"
+                    phx-value-id={stored.id}
+                    class={[
+                      "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
+                      if(@comp_suggestion_record_id == stored.id,
+                        do: "border-primary/50 bg-primary/10",
+                        else: "border-base-300 bg-base-100/50"
+                      )
+                    ]}
+                  >
+                    <span class="flex items-center justify-between gap-2">
+                      <span class="text-xs font-bold text-base-content/70">
+                        {format_datetime(stored.generated_at)}
+                      </span>
+                      <%= if stored.fresh? do %>
+                        <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
+                          Cached
+                        </span>
+                      <% end %>
+                    </span>
+                    <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
+                      {stored.suggestion["summary"]}
+                    </span>
+                  </button>
+                <% end %>
+              </div>
+            <% end %>
+
             <%= if @comp_suggestion do %>
               <div id="comp-suggestion-result" class="space-y-4 border-t border-base-300 px-4 py-4">
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <p class="max-w-3xl text-sm leading-6 text-base-content/70">
-                    {@comp_suggestion["summary"]}
-                  </p>
+                  <div>
+                    <p class="max-w-3xl text-sm leading-6 text-base-content/70">
+                      {@comp_suggestion["summary"]}
+                    </p>
+                    <p
+                      :if={@comp_suggestion_generated_at}
+                      id="comp-suggestion-generated-at"
+                      class="mt-1 text-xs text-base-content/40"
+                    >
+                      Generated {format_datetime(@comp_suggestion_generated_at)}
+                    </p>
+                  </div>
                   <span class={[
                     "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
                     confidence_badge_class(@comp_suggestion["confidence"])
