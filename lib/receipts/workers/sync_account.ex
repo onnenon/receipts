@@ -7,9 +7,21 @@ defmodule Receipts.Workers.SyncAccount do
   @backward_page_size 50
   @forward_page_size 100
   @riot_client Application.compile_env(:receipts, :riot_client, Receipts.Riot.Client)
+  @data_dragon Application.compile_env(:receipts, :data_dragon, Receipts.Riot.DataDragon)
+  @refreshed_champion_map_key {__MODULE__, :refreshed_champion_map}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"account_id" => account_id}}) do
+    Process.delete(@refreshed_champion_map_key)
+
+    try do
+      sync_account(account_id)
+    after
+      Process.delete(@refreshed_champion_map_key)
+    end
+  end
+
+  defp sync_account(account_id) do
     account = Ash.get!(Receipts.LoL.Account, account_id)
     tag = "#{account.riot_game_name}##{account.riot_tag_line} (#{account.riot_region})"
     champion_map = load_champion_map()
@@ -412,10 +424,10 @@ defmodule Receipts.Workers.SyncAccount do
 
     champion_riot_id = participant["championId"]
 
-    case Map.get(champion_map, champion_riot_id) do
+    case resolve_champion(champion_map, champion_riot_id, match_id) do
       nil ->
         Logger.warning(
-          "[SyncAccount] Champion ID #{champion_riot_id} not in local map for #{match_id}, skipping participant"
+          "[SyncAccount] Champion ID #{champion_riot_id} not in local map for #{match_id} after Data Dragon refresh, skipping participant"
         )
 
         :ok
@@ -458,5 +470,40 @@ defmodule Receipts.Workers.SyncAccount do
     Receipts.LoL.Champion
     |> Ash.read!()
     |> Map.new(&{&1.riot_id, &1})
+  end
+
+  defp resolve_champion(champion_map, champion_riot_id, match_id) do
+    case Map.get(champion_map, champion_riot_id) do
+      nil -> resolve_missing_champion(champion_riot_id, match_id)
+      champion -> champion
+    end
+  end
+
+  defp resolve_missing_champion(champion_riot_id, match_id) do
+    case Process.get(@refreshed_champion_map_key) do
+      nil -> refresh_champion_map(champion_riot_id, match_id)
+      champion_map -> Map.get(champion_map, champion_riot_id)
+    end
+  end
+
+  defp refresh_champion_map(champion_riot_id, match_id) do
+    Logger.info(
+      "[SyncAccount] Champion ID #{champion_riot_id} not in local map for #{match_id}, refreshing Data Dragon"
+    )
+
+    case @data_dragon.sync_champions() do
+      {:ok, _count} ->
+        champion_map = load_champion_map()
+        Process.put(@refreshed_champion_map_key, champion_map)
+        Map.get(champion_map, champion_riot_id)
+
+      {:error, reason} ->
+        Logger.warning(
+          "[SyncAccount] Data Dragon refresh failed while resolving champion ID #{champion_riot_id}: #{inspect(reason)}"
+        )
+
+        Process.put(@refreshed_champion_map_key, %{})
+        nil
+    end
   end
 end

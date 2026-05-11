@@ -2,11 +2,13 @@ defmodule Receipts.Workers.SyncAccountTest do
   use Receipts.DataCase
 
   alias Receipts.LoL.{Account, Champion, Match, MatchParticipant, Player}
+  alias Receipts.DataDragonStub
   alias Receipts.RiotClientStub
   alias Receipts.Workers.SyncAccount
 
   setup do
     RiotClientStub.reset()
+    DataDragonStub.reset()
 
     player =
       Player
@@ -104,6 +106,36 @@ defmodule Receipts.Workers.SyncAccountTest do
     assert account.oldest_synced_start == 0
     refute account.history_fully_synced
     assert RiotClientStub.match_id_calls() == []
+  end
+
+  test "refreshes champion data when a match references a missing champion", %{account: account} do
+    stale_champion_riot_id = 3151
+    base_time = ~U[2026-05-10 12:00:00Z]
+    account = update_account!(account, %{history_fully_synced: true})
+
+    DataDragonStub.put_sync(fn ->
+      Champion
+      |> Ash.Changeset.for_create(:create, %{
+        riot_id: stale_champion_riot_id,
+        name: "New Test Champ",
+        key: "NewTestChamp",
+        image: "new-test-champ.png"
+      })
+      |> Ash.create!()
+
+      {:ok, 1}
+    end)
+
+    matches =
+      build_matches(account, %{riot_id: stale_champion_riot_id}, 1, base_time)
+
+    stub_match_ids_from_matches(matches)
+    stub_match_details(matches)
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    assert DataDragonStub.sync_calls() == 1
+    assert participant_count(account) == 1
   end
 
   test "records sync completion separately from the newest match cursor", %{account: account} do
