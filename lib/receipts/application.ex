@@ -9,6 +9,8 @@ defmodule Receipts.Application do
 
   @impl true
   def start(_type, _args) do
+    configure_logger_formatter()
+
     log_api_key_status()
     log_gemini_api_key_status()
     log_admin_password_status()
@@ -30,6 +32,15 @@ defmodule Receipts.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Receipts.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp configure_logger_formatter do
+    formatter =
+      :logger
+      |> Application.get_env(:default_formatter, [])
+      |> Receipts.LoggerFormatter.new()
+
+    :logger.update_handler_config(:default, :formatter, formatter)
   end
 
   # Tell Phoenix to update the endpoint configuration

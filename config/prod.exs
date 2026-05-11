@@ -12,6 +12,7 @@ config :receipts, ReceiptsWeb.Endpoint, cache_static_manifest: "priv/static/cach
 # Note `:force_ssl` is required to be set at compile-time.
 config :receipts, ReceiptsWeb.Endpoint,
   force_ssl: [
+    log: false,
     rewrite_on: [:x_forwarded_proto],
     exclude: [
       # paths: ["/health"],
