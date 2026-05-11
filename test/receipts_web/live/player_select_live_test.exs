@@ -76,11 +76,16 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     render_async(admin_view)
 
     assert has_element?(admin_view, "#comp-suggestion-result", "Koozie should play mid")
+    assert has_element?(admin_view, "#comp-suggestion-result", "he is reliable")
     assert has_element?(admin_view, "#comp-suggestion-result", "Kupo")
     assert has_element?(admin_view, "#comp-suggestion-result", "Recent mid: 24 games")
     assert has_element?(admin_view, "#comp-suggestion-result", "Safer lane setup")
     assert has_element?(admin_view, "#comp-suggestion-result", "Support")
+    assert has_element?(admin_view, "#comp-suggestion-result", "his recent support games")
     refute has_element?(admin_view, "#comp-suggestion-result", "recent_non_shared_positions")
+    refute has_element?(admin_view, "#comp-suggestion-result", "Utility")
+    refute has_element?(admin_view, "#comp-suggestion-result", "she")
+    refute has_element?(admin_view, "#comp-suggestion-result", "Her")
   end
 
   test "admin comparison page loads a fresh cached comp suggestion", %{conn: conn} do
@@ -114,6 +119,13 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     {:ok, view, _html} = live(admin_conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
 
     refute has_element?(view, "#comp-suggestion-result")
+    assert has_element?(view, "#toggle-comp-suggestion-history", "History")
+    refute has_element?(view, "#comp-suggestion-history")
+
+    view
+    |> element("#toggle-comp-suggestion-history")
+    |> render_click()
+
     assert has_element?(view, "#comp-suggestion-history")
 
     view

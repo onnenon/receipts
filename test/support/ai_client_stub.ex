@@ -4,7 +4,8 @@ defmodule Receipts.AIClientStub do
   def generate_structured(_prompt, _schema, _opts \\ []) do
     {:ok,
      %{
-       "summary" => "Koozie should play mid while Kupo covers support.",
+       "summary" =>
+         "Koozie should play mid while Kupo covers utility because she is reliable there.",
        "confidence" => "medium",
        "recommended_lineup" => [
          %{
@@ -23,9 +24,9 @@ defmodule Receipts.AIClientStub do
            "player_id" => "player-b",
            "player_name" => "Kupo",
            "position" => "UTILITY",
-           "position_label" => "Support",
+           "position_label" => "Utility",
            "champions" => ["Lulu"],
-           "reason" => "Recent support games add useful context.",
+           "reason" => "Her recent utility games add useful context.",
            "evidence" => ["Recent non-shared support games are positive."]
          }
        ],
@@ -47,7 +48,7 @@ defmodule Receipts.AIClientStub do
                "player_id" => "player-b",
                "player_name" => "Kupo",
                "position" => "UTILITY",
-               "position_label" => "Support",
+               "position_label" => "Utility",
                "champions" => ["Lulu"],
                "reason" => "Reliable support option.",
                "evidence" => []

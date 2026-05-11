@@ -109,7 +109,7 @@ defmodule Receipts.AI.CompSuggestion do
 
     %{
       id: record.id,
-      suggestion: record.suggestion,
+      suggestion: clean_suggestion(record.suggestion),
       generated_at: record.generated_at,
       cached?: cached?,
       fresh?: fresh?(record)
@@ -134,6 +134,7 @@ defmodule Receipts.AI.CompSuggestion do
       Use only the supplied JSON. Recommend one primary position per player.
       Prefer evidence from shared games, then recent non-shared games, then overall games.
       Be explicit about low sample sizes. Do not invent player history or champion stats.
+      All players in this friend group are men; use he/him/his pronouns for every player.
       Write user-facing prose. Never include raw JSON path names, snake_case keys, or dotted
       references like recent_non_shared_positions.MIDDLE in the response.
       Each alternative must include a complete lineup with one slot for every selected player.
@@ -215,7 +216,7 @@ defmodule Receipts.AI.CompSuggestion do
     selected_players = Map.new(context.selected_players, &{&1.id, &1.name})
 
     %{
-      "summary" => Map.get(response, "summary", ""),
+      "summary" => clean_prose(Map.get(response, "summary", "")),
       "confidence" => Map.get(response, "confidence", "low"),
       "recommended_lineup" =>
         response
@@ -225,14 +226,14 @@ defmodule Receipts.AI.CompSuggestion do
         response
         |> Map.get("alternatives", [])
         |> Enum.map(&normalize_alternative(&1, selected_players)),
-      "caveats" => Map.get(response, "caveats", [])
+      "caveats" => Enum.map(Map.get(response, "caveats", []), &clean_prose/1)
     }
   end
 
   defp normalize_alternative(alternative, selected_players) do
     %{
       "name" => Map.get(alternative, "name", "Alternative"),
-      "notes" => Map.get(alternative, "notes", ""),
+      "notes" => clean_prose(Map.get(alternative, "notes", "")),
       "lineup" =>
         alternative
         |> Map.get("lineup", [])
@@ -247,11 +248,76 @@ defmodule Receipts.AI.CompSuggestion do
       "player_id" => player_id,
       "player_name" => Map.get(selected_players, player_id, Map.get(slot, "player_name", "")),
       "position" => Map.get(slot, "position", ""),
-      "position_label" =>
-        Map.get(slot, "position_label", position_label(Map.get(slot, "position"))),
+      "position_label" => position_label(Map.get(slot, "position")),
       "champions" => Map.get(slot, "champions", []),
-      "reason" => Map.get(slot, "reason", ""),
+      "reason" => clean_prose(Map.get(slot, "reason", "")),
       "evidence" => Enum.map(Map.get(slot, "evidence", []), &humanize_evidence/1)
+    }
+  end
+
+  defp clean_suggestion(suggestion) when is_map(suggestion) do
+    %{
+      "summary" => clean_prose(Map.get(suggestion, "summary", "")),
+      "confidence" => Map.get(suggestion, "confidence", "low"),
+      "recommended_lineup" =>
+        suggestion
+        |> Map.get("recommended_lineup", [])
+        |> Enum.map(&clean_slot/1),
+      "alternatives" =>
+        suggestion
+        |> Map.get("alternatives", [])
+        |> Enum.map(&clean_alternative/1),
+      "caveats" => Enum.map(Map.get(suggestion, "caveats", []), &clean_prose/1)
+    }
+  end
+
+  defp clean_suggestion(_suggestion) do
+    %{
+      "summary" => "",
+      "confidence" => "low",
+      "recommended_lineup" => [],
+      "alternatives" => [],
+      "caveats" => []
+    }
+  end
+
+  defp clean_alternative(alternative) when is_map(alternative) do
+    %{
+      "name" => Map.get(alternative, "name", "Alternative"),
+      "notes" => clean_prose(Map.get(alternative, "notes", "")),
+      "lineup" =>
+        alternative
+        |> Map.get("lineup", [])
+        |> Enum.map(&clean_slot/1)
+    }
+  end
+
+  defp clean_alternative(_alternative),
+    do: %{"name" => "Alternative", "notes" => "", "lineup" => []}
+
+  defp clean_slot(slot) when is_map(slot) do
+    position = Map.get(slot, "position", "")
+
+    %{
+      "player_id" => Map.get(slot, "player_id", ""),
+      "player_name" => Map.get(slot, "player_name", ""),
+      "position" => position,
+      "position_label" => position_label(position),
+      "champions" => Map.get(slot, "champions", []),
+      "reason" => clean_prose(Map.get(slot, "reason", "")),
+      "evidence" => Enum.map(Map.get(slot, "evidence", []), &humanize_evidence/1)
+    }
+  end
+
+  defp clean_slot(_slot) do
+    %{
+      "player_id" => "",
+      "player_name" => "",
+      "position" => "",
+      "position_label" => "",
+      "champions" => [],
+      "reason" => "",
+      "evidence" => []
     }
   end
 
@@ -269,10 +335,21 @@ defmodule Receipts.AI.CompSuggestion do
     |> String.replace(~r/\bMIDDLE\b/, "mid")
     |> String.replace(~r/\bBOTTOM\b/, "bot")
     |> String.replace(~r/\bUTILITY\b/, "support")
+    |> clean_prose()
     |> capitalize_first()
   end
 
   defp humanize_evidence(evidence), do: evidence
+
+  defp clean_prose(text) when is_binary(text) do
+    text
+    |> String.replace(~r/\b[Ss]he\b/, "he")
+    |> String.replace(~r/\b[Hh]ers\b/, "his")
+    |> String.replace(~r/\b[Hh]er\b/, "his")
+    |> String.replace(~r/\butility\b/i, "support")
+  end
+
+  defp clean_prose(text), do: text
 
   defp capitalize_first(""), do: ""
 

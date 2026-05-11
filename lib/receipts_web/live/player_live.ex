@@ -102,6 +102,7 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:comp_suggestion_generated_at, nil)
          |> assign(:comp_suggestion_cached, false)
          |> assign(:comp_suggestion_history, [])
+         |> assign(:comp_suggestion_history_open, false)
          |> assign(:comp_suggestion_error, nil)
          |> assign(:comp_suggestion_loading, false)
          |> assign(:recent_queue_filter, nil)
@@ -292,6 +293,16 @@ defmodule ReceiptsWeb.PlayerLive do
 
   def handle_event("suggest_comp", _params, socket) do
     {:noreply, put_flash(socket, :error, "Comp suggestions are admin-only.")}
+  end
+
+  @impl true
+  def handle_event("toggle_comp_suggestion_history", _params, socket) do
+    {:noreply,
+     assign(
+       socket,
+       :comp_suggestion_history_open,
+       !socket.assigns.comp_suggestion_history_open
+     )}
   end
 
   @impl true
@@ -500,6 +511,7 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:comp_suggestion_cached, false)
     |> assign(:comp_suggestion_error, nil)
     |> assign(:comp_suggestion_loading, false)
+    |> assign(:comp_suggestion_history_open, false)
     |> load_comp_suggestion_cache()
   end
 
@@ -1232,39 +1244,62 @@ defmodule ReceiptsWeb.PlayerLive do
             <% end %>
 
             <%= if @comp_suggestion_history != [] do %>
-              <div
-                id="comp-suggestion-history"
-                class="grid gap-2 border-t border-base-300 px-4 py-3 md:grid-cols-2 xl:grid-cols-3"
-              >
-                <%= for stored <- @comp_suggestion_history do %>
-                  <button
-                    id={"view-comp-suggestion-#{stored.id}"}
-                    type="button"
-                    phx-click="view_comp_suggestion"
-                    phx-value-id={stored.id}
+              <div class="border-t border-base-300 px-4 py-2">
+                <button
+                  id="toggle-comp-suggestion-history"
+                  type="button"
+                  phx-click="toggle_comp_suggestion_history"
+                  aria-expanded={@comp_suggestion_history_open}
+                  aria-controls="comp-suggestion-history"
+                  class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold text-base-content/45 transition hover:bg-base-100 hover:text-base-content/70"
+                >
+                  <.icon name="hero-clock-mini" class="h-4 w-4" />
+                  History
+                  <span class="text-base-content/35">({length(@comp_suggestion_history)})</span>
+                  <.icon
+                    name="hero-chevron-down-mini"
                     class={[
-                      "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
-                      if(@comp_suggestion_record_id == stored.id,
-                        do: "border-primary/50 bg-primary/10",
-                        else: "border-base-300 bg-base-100/50"
-                      )
+                      "h-4 w-4 transition-transform",
+                      @comp_suggestion_history_open && "rotate-180"
                     ]}
-                  >
-                    <span class="flex items-center justify-between gap-2">
-                      <span class="text-xs font-bold text-base-content/70">
-                        {format_datetime(stored.generated_at)}
-                      </span>
-                      <%= if stored.fresh? do %>
-                        <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
-                          Cached
+                  />
+                </button>
+
+                <div
+                  :if={@comp_suggestion_history_open}
+                  id="comp-suggestion-history"
+                  class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3"
+                >
+                  <%= for stored <- @comp_suggestion_history do %>
+                    <button
+                      id={"view-comp-suggestion-#{stored.id}"}
+                      type="button"
+                      phx-click="view_comp_suggestion"
+                      phx-value-id={stored.id}
+                      class={[
+                        "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
+                        if(@comp_suggestion_record_id == stored.id,
+                          do: "border-primary/50 bg-primary/10",
+                          else: "border-base-300 bg-base-100/50"
+                        )
+                      ]}
+                    >
+                      <span class="flex items-center justify-between gap-2">
+                        <span class="text-xs font-bold text-base-content/70">
+                          {format_datetime(stored.generated_at)}
                         </span>
-                      <% end %>
-                    </span>
-                    <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
-                      {stored.suggestion["summary"]}
-                    </span>
-                  </button>
-                <% end %>
+                        <%= if stored.fresh? do %>
+                          <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
+                            Cached
+                          </span>
+                        <% end %>
+                      </span>
+                      <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
+                        {stored.suggestion["summary"]}
+                      </span>
+                    </button>
+                  <% end %>
+                </div>
               </div>
             <% end %>
 
@@ -1311,7 +1346,7 @@ defmodule ReceiptsWeb.PlayerLive do
                           "inline-flex rounded-md px-2 py-1 text-xs font-bold ring-1",
                           position_badge_class(slot["position"])
                         ]}>
-                          {slot["position"]}
+                          {slot["position_label"]}
                         </span>
                       </div>
 
