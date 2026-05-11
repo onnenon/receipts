@@ -16,6 +16,8 @@ defmodule Receipts.AIClientStub do
            "champions" => ["Ahri"],
            "reason" => "Best shared-game sample is in mid.",
            "evidence" => [
+             "Recent non-shared games: Jungle (14 games, 64.3% win rate)",
+             "Recent non-shared games: Jax (2 games, 100% win rate, low sample size)",
              "recent_non_shared_positions.MIDDLE: 24 games, 58.3% win rate",
              "recent_non_shared_top_champions.Akshan: 14 games, 71.4% win rate (MIDDLE)"
            ]

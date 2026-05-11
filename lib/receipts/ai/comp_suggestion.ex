@@ -323,6 +323,9 @@ defmodule Receipts.AI.CompSuggestion do
 
   defp humanize_evidence(evidence) when is_binary(evidence) do
     evidence
+    |> String.replace(~r/^Recent non-shared games:\s*/i, "Recent ")
+    |> String.replace(~r/^Shared games:\s*/i, "Shared ")
+    |> String.replace(~r/^Overall games:\s*/i, "Overall ")
     |> String.replace("recent_non_shared_positions.", "Recent ")
     |> String.replace("recent_non_shared_top_champions.", "Recent ")
     |> String.replace("shared_positions.", "Shared ")
@@ -335,11 +338,36 @@ defmodule Receipts.AI.CompSuggestion do
     |> String.replace(~r/\bMIDDLE\b/, "mid")
     |> String.replace(~r/\bBOTTOM\b/, "bot")
     |> String.replace(~r/\bUTILITY\b/, "support")
+    |> normalize_evidence_parenthetical()
     |> clean_prose()
     |> capitalize_first()
   end
 
   defp humanize_evidence(evidence), do: evidence
+
+  defp normalize_evidence_parenthetical(evidence) do
+    case Regex.run(~r/^(Recent|Shared|Overall)\s+([^:()]+)\s+\((.+)\)$/i, evidence) do
+      [_, scope, subject, details] ->
+        "#{capitalize_first(String.downcase(scope))} #{evidence_subject(subject)}: #{details}"
+
+      _ ->
+        evidence
+    end
+  end
+
+  defp evidence_subject(subject) do
+    case subject |> String.trim() |> String.downcase() do
+      "top" -> "top"
+      "jungle" -> "jungle"
+      "middle" -> "mid"
+      "mid" -> "mid"
+      "bottom" -> "bot"
+      "bot" -> "bot"
+      "utility" -> "support"
+      "support" -> "support"
+      _ -> String.trim(subject)
+    end
+  end
 
   defp clean_prose(text) when is_binary(text) do
     text
