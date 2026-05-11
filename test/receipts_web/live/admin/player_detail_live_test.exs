@@ -36,6 +36,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLiveTest do
       _game_name, _tag_line, _routing -> {:error, :not_found}
     end)
 
+    conn = log_in_admin(conn)
     {:ok, view, _html} = live(conn, ~p"/admin/players/#{player.id}")
 
     view

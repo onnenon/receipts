@@ -27,6 +27,11 @@ defmodule ReceiptsWeb.Layouts do
   """
   attr(:flash, :map, required: true, doc: "the map of flash messages")
 
+  attr(:admin_authenticated, :boolean,
+    default: false,
+    doc: "whether the current session can access admin views"
+  )
+
   attr(:current_scope, :map,
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
@@ -45,7 +50,11 @@ defmodule ReceiptsWeb.Layouts do
           Receipts
         </a>
         <nav class="flex items-center gap-2 overflow-x-auto">
-          <a href="/admin/players" class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content">
+          <a
+            :if={@admin_authenticated}
+            href="/admin/players"
+            class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
+          >
             Admin
           </a>
           <.theme_toggle />

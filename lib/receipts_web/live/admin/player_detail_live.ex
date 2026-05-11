@@ -242,7 +242,7 @@ defmodule ReceiptsWeb.Admin.PlayerDetailLive do
     assigns = assign(assigns, :region_options, region_options())
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
       <div class="space-y-8">
         <%!-- Breadcrumb --%>
         <div class="flex items-center gap-2 text-sm text-base-content/50">

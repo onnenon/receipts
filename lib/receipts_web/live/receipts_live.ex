@@ -120,23 +120,6 @@ defmodule ReceiptsWeb.ReceiptsLive do
     {:noreply, maybe_rerun(socket)}
   end
 
-  @impl true
-  def handle_event("select_all_queues", _, socket) do
-    enabled =
-      Queue.ui_queues()
-      |> Enum.map(fn {queue_type, _label, _default} -> queue_type end)
-      |> MapSet.new()
-
-    socket = assign(socket, :enabled_queues, enabled)
-    {:noreply, maybe_rerun(socket)}
-  end
-
-  @impl true
-  def handle_event("clear_queues", _, socket) do
-    socket = assign(socket, :enabled_queues, MapSet.new())
-    {:noreply, maybe_rerun(socket)}
-  end
-
   defp maybe_rerun(%{assigns: %{search_player_id: pid, search_champion_key: ck}} = socket)
        when is_binary(pid) and is_binary(ck) do
     run_query(socket)
@@ -214,58 +197,6 @@ defmodule ReceiptsWeb.ReceiptsLive do
   defp win_rate_color(rate) when rate < 45.0, do: "text-error"
   defp win_rate_color(_), do: "text-base-content"
 
-  @position_defs [
-    {"TOP", "Top"},
-    {"JUNGLE", "Jungle"},
-    {"MIDDLE", "Mid"},
-    {"BOTTOM", "Bot"},
-    {"UTILITY", "Support"}
-  ]
-
-  defp position_defs, do: @position_defs
-
-  defp position_label("TOP"), do: "Top"
-  defp position_label("JUNGLE"), do: "Jungle"
-  defp position_label("MIDDLE"), do: "Mid"
-  defp position_label("BOTTOM"), do: "Bot"
-  defp position_label("UTILITY"), do: "Support"
-  defp position_label(p) when is_binary(p), do: String.capitalize(String.downcase(p))
-  defp position_label(_), do: "Unknown"
-
-  defp position_badge_class("TOP"), do: "bg-amber-500/20 text-amber-400 ring-amber-500/20"
-  defp position_badge_class("JUNGLE"), do: "bg-emerald-500/20 text-emerald-400 ring-emerald-500/20"
-  defp position_badge_class("MIDDLE"), do: "bg-sky-500/20 text-sky-400 ring-sky-500/20"
-  defp position_badge_class("BOTTOM"), do: "bg-rose-500/20 text-rose-400 ring-rose-500/20"
-  defp position_badge_class("UTILITY"), do: "bg-violet-500/20 text-violet-400 ring-violet-500/20"
-  defp position_badge_class(_), do: "bg-base-300/50 text-base-content/50 ring-base-300/50"
-
-  defp position_filter_active_class("TOP"), do: "bg-amber-500 text-white border-amber-500"
-  defp position_filter_active_class("JUNGLE"), do: "bg-emerald-500 text-white border-emerald-500"
-  defp position_filter_active_class("MIDDLE"), do: "bg-sky-500 text-white border-sky-500"
-  defp position_filter_active_class("BOTTOM"), do: "bg-rose-500 text-white border-rose-500"
-  defp position_filter_active_class("UTILITY"), do: "bg-violet-500 text-white border-violet-500"
-  defp position_filter_active_class(_), do: "bg-primary text-primary-content border-primary"
-
-  defp position_card_class("TOP"), do: "border-amber-500/30 bg-amber-500/10"
-  defp position_card_class("JUNGLE"), do: "border-emerald-500/30 bg-emerald-500/10"
-  defp position_card_class("MIDDLE"), do: "border-sky-500/30 bg-sky-500/10"
-  defp position_card_class("BOTTOM"), do: "border-rose-500/30 bg-rose-500/10"
-  defp position_card_class("UTILITY"), do: "border-violet-500/30 bg-violet-500/10"
-  defp position_card_class(_), do: "border-base-300 bg-base-300/50"
-
-  defp queue_button_class(queue_type, enabled_queues, positions_active?) do
-    cond do
-      positions_active? && !Queue.has_positions?(queue_type) ->
-        "border-base-300/40 text-base-content/25 opacity-40 cursor-not-allowed"
-
-      MapSet.member?(enabled_queues, queue_type) ->
-        "bg-primary text-primary-content border-primary"
-
-      true ->
-        "border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70"
-    end
-  end
-
   defp top_champion_for(player_top_champions, player) do
     Map.get(player_top_champions, player.id)
   end
@@ -279,7 +210,7 @@ defmodule ReceiptsWeb.ReceiptsLive do
     assigns = assign(assigns, :queue_defs, Queue.ui_queues())
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
       <div class="space-y-6">
         <div class="flex flex-col gap-2">
           <p class="text-xs font-semibold uppercase tracking-wide text-primary">Receipt lookup</p>

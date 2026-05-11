@@ -375,7 +375,10 @@ defmodule ReceiptsWeb.PlayerLive do
   defp position_label(_), do: "Unknown"
 
   defp position_badge_class("TOP"), do: "bg-amber-500/20 text-amber-400 ring-amber-500/20"
-  defp position_badge_class("JUNGLE"), do: "bg-emerald-500/20 text-emerald-400 ring-emerald-500/20"
+
+  defp position_badge_class("JUNGLE"),
+    do: "bg-emerald-500/20 text-emerald-400 ring-emerald-500/20"
+
   defp position_badge_class("MIDDLE"), do: "bg-sky-500/20 text-sky-400 ring-sky-500/20"
   defp position_badge_class("BOTTOM"), do: "bg-rose-500/20 text-rose-400 ring-rose-500/20"
   defp position_badge_class("UTILITY"), do: "bg-violet-500/20 text-violet-400 ring-violet-500/20"
@@ -427,16 +430,36 @@ defmodule ReceiptsWeb.PlayerLive do
   defp rank_tier_glow(%{rank_tier: "BRONZE"}), do: "bg-amber-700"
   defp rank_tier_glow(_), do: "bg-zinc-500"
 
-  defp rank_tier_badge(%{rank_tier: "CHALLENGER"}), do: "border-yellow-400/30 bg-yellow-400/10 text-yellow-300"
-  defp rank_tier_badge(%{rank_tier: "GRANDMASTER"}), do: "border-red-400/30 bg-red-400/10 text-red-300"
-  defp rank_tier_badge(%{rank_tier: "MASTER"}), do: "border-purple-400/30 bg-purple-400/10 text-purple-300"
-  defp rank_tier_badge(%{rank_tier: "DIAMOND"}), do: "border-blue-400/30 bg-blue-400/10 text-blue-300"
-  defp rank_tier_badge(%{rank_tier: "EMERALD"}), do: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-  defp rank_tier_badge(%{rank_tier: "PLATINUM"}), do: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-  defp rank_tier_badge(%{rank_tier: "GOLD"}), do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
-  defp rank_tier_badge(%{rank_tier: "SILVER"}), do: "border-slate-400/30 bg-slate-400/10 text-slate-300"
-  defp rank_tier_badge(%{rank_tier: "BRONZE"}), do: "border-amber-700/30 bg-amber-700/10 text-amber-500"
-  defp rank_tier_badge(%{rank_tier: "IRON"}), do: "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
+  defp rank_tier_badge(%{rank_tier: "CHALLENGER"}),
+    do: "border-yellow-400/30 bg-yellow-400/10 text-yellow-300"
+
+  defp rank_tier_badge(%{rank_tier: "GRANDMASTER"}),
+    do: "border-red-400/30 bg-red-400/10 text-red-300"
+
+  defp rank_tier_badge(%{rank_tier: "MASTER"}),
+    do: "border-purple-400/30 bg-purple-400/10 text-purple-300"
+
+  defp rank_tier_badge(%{rank_tier: "DIAMOND"}),
+    do: "border-blue-400/30 bg-blue-400/10 text-blue-300"
+
+  defp rank_tier_badge(%{rank_tier: "EMERALD"}),
+    do: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+
+  defp rank_tier_badge(%{rank_tier: "PLATINUM"}),
+    do: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+
+  defp rank_tier_badge(%{rank_tier: "GOLD"}),
+    do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
+
+  defp rank_tier_badge(%{rank_tier: "SILVER"}),
+    do: "border-slate-400/30 bg-slate-400/10 text-slate-300"
+
+  defp rank_tier_badge(%{rank_tier: "BRONZE"}),
+    do: "border-amber-700/30 bg-amber-700/10 text-amber-500"
+
+  defp rank_tier_badge(%{rank_tier: "IRON"}),
+    do: "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
+
   defp rank_tier_badge(_), do: "border-base-300 bg-base-300/50 text-base-content/70"
 
   defp format_duration(nil), do: "—"
@@ -479,7 +502,7 @@ defmodule ReceiptsWeb.PlayerLive do
       )
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
       <div class="space-y-6">
         <%!-- Header --%>
         <% best = best_rank(@player.accounts) %>

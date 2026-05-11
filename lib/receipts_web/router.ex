@@ -4,6 +4,7 @@ defmodule ReceiptsWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    plug(:load_admin_authenticated)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {ReceiptsWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -17,12 +18,20 @@ defmodule ReceiptsWeb.Router do
   scope "/", ReceiptsWeb do
     pipe_through(:browser)
 
-    live_session :default do
+    get("/login", AdminSessionController, :new)
+    post("/login", AdminSessionController, :create)
+    get("/admin/login", AdminSessionController, :new)
+    post("/admin/login", AdminSessionController, :create)
+
+    live_session :default, on_mount: {ReceiptsWeb.AdminAuth, :assign_admin_authenticated} do
       live("/", PlayerSelectLive, :index)
       live("/players/:id", PlayerLive, :show)
+      live("/receipts", ReceiptsLive, :index)
+    end
+
+    live_session :admin, on_mount: {ReceiptsWeb.AdminAuth, :ensure_authenticated} do
       live("/admin/players", Admin.PlayersLive, :index)
       live("/admin/players/:id", Admin.PlayerDetailLive, :show)
-      live("/receipts", ReceiptsLive, :index)
     end
   end
 
@@ -35,5 +44,9 @@ defmodule ReceiptsWeb.Router do
       live_dashboard("/dashboard", metrics: ReceiptsWeb.Telemetry)
       forward("/mailbox", Plug.Swoosh.MailboxPreview)
     end
+  end
+
+  defp load_admin_authenticated(conn, _opts) do
+    Plug.Conn.assign(conn, :admin_authenticated, ReceiptsWeb.AdminAuth.authenticated_conn?(conn))
   end
 end

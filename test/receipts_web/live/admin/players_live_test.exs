@@ -6,6 +6,7 @@ defmodule ReceiptsWeb.Admin.PlayersLiveTest do
   alias Receipts.LoL.Player
 
   test "creates a new player from the modal", %{conn: conn} do
+    conn = log_in_admin(conn)
     {:ok, view, _html} = live(conn, ~p"/admin/players")
 
     view
@@ -28,6 +29,7 @@ defmodule ReceiptsWeb.Admin.PlayersLiveTest do
   end
 
   test "closes the new player modal from the backdrop", %{conn: conn} do
+    conn = log_in_admin(conn)
     {:ok, view, _html} = live(conn, ~p"/admin/players")
 
     view

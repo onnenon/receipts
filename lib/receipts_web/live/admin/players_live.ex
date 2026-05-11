@@ -71,7 +71,7 @@ defmodule ReceiptsWeb.Admin.PlayersLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
       <div class="space-y-6">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>

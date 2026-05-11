@@ -1,0 +1,38 @@
+<Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
+  <div class="mx-auto flex min-h-[70vh] max-w-md items-center">
+    <div class="w-full rounded-2xl border border-base-300 bg-base-200 p-6 shadow-sm sm:p-8">
+      <div class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-primary">
+        <.icon name="hero-lock-closed-mini" class="size-4" />
+        Admin login
+      </div>
+
+      <h1 class="mt-3 text-3xl font-bold tracking-tight">Enter the admin password</h1>
+      <p class="mt-2 text-sm leading-6 text-base-content/60">
+        Access to player management is protected by a shared password.
+      </p>
+
+      <form method="post" action={~p"/login"} class="mt-8 space-y-5">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <input type="hidden" name="return_to" value={@return_to} />
+
+        <.input
+          name="admin_password"
+          type="password"
+          value=""
+          label="Password"
+          autocomplete="current-password"
+          required
+        />
+
+        <div class="flex justify-end">
+          <button
+            type="submit"
+            class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:opacity-90"
+          >
+            Unlock Admin
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</Layouts.app>

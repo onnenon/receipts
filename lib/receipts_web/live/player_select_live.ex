@@ -32,11 +32,17 @@ defmodule ReceiptsWeb.PlayerSelectLive do
   defp tier_classes("SILVER"), do: {"text-slate-300", "bg-slate-600/50 border-slate-500/40"}
   defp tier_classes("GOLD"), do: {"text-yellow-400", "bg-yellow-950/60 border-yellow-700/40"}
   defp tier_classes("PLATINUM"), do: {"text-cyan-400", "bg-cyan-950/60 border-cyan-700/40"}
-  defp tier_classes("EMERALD"), do: {"text-emerald-400", "bg-emerald-950/60 border-emerald-700/40"}
+
+  defp tier_classes("EMERALD"),
+    do: {"text-emerald-400", "bg-emerald-950/60 border-emerald-700/40"}
+
   defp tier_classes("DIAMOND"), do: {"text-blue-400", "bg-blue-950/60 border-blue-700/40"}
   defp tier_classes("MASTER"), do: {"text-purple-400", "bg-purple-950/60 border-purple-700/40"}
   defp tier_classes("GRANDMASTER"), do: {"text-red-400", "bg-red-950/60 border-red-700/40"}
-  defp tier_classes("CHALLENGER"), do: {"text-yellow-300", "bg-yellow-900/60 border-yellow-600/40"}
+
+  defp tier_classes("CHALLENGER"),
+    do: {"text-yellow-300", "bg-yellow-900/60 border-yellow-600/40"}
+
   defp tier_classes(_), do: {"text-base-content/50", "bg-base-300/50 border-base-300/40"}
 
   defp format_rank(%{tier: tier, division: div, lp: lp}) do
@@ -57,7 +63,7 @@ defmodule ReceiptsWeb.PlayerSelectLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} admin_authenticated={@admin_authenticated}>
       <div class="space-y-8">
         <div class="text-center space-y-2 pt-4">
           <p class="text-xs font-semibold uppercase tracking-widest text-primary">Who's up?</p>

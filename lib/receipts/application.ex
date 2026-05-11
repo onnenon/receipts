@@ -10,6 +10,7 @@ defmodule Receipts.Application do
   @impl true
   def start(_type, _args) do
     log_api_key_status()
+    log_admin_password_status()
 
     children =
       [
@@ -59,6 +60,16 @@ defmodule Receipts.Application do
             "[Config] RIOT_API_KEY looks malformed (expected 'RGAPI-' + 36 char UUID, got #{byte_size(trimmed)} bytes)"
           )
         end
+    end
+  end
+
+  defp log_admin_password_status do
+    case Application.get_env(:receipts, :admin_password) || System.get_env("ADMIN_PASSWORD") do
+      nil ->
+        Logger.error("[Config] ADMIN_PASSWORD is not set — admin views will remain locked")
+
+      password ->
+        Logger.info("[Config] ADMIN_PASSWORD loaded (#{byte_size(password)} bytes)")
     end
   end
 

@@ -16,6 +16,7 @@ defmodule ReceiptsWeb.ConnCase do
   """
 
   use ExUnit.CaseTemplate
+  require Phoenix.ConnTest
 
   using do
     quote do
@@ -35,5 +36,17 @@ defmodule ReceiptsWeb.ConnCase do
   setup tags do
     Receipts.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
+  end
+
+  def admin_password do
+    Application.get_env(:receipts, :admin_password) ||
+      System.get_env("ADMIN_PASSWORD") ||
+      "test-admin-password"
+  end
+
+  def log_in_admin(conn, password \\ admin_password()) do
+    Phoenix.ConnTest.dispatch(conn, ReceiptsWeb.Endpoint, :post, "/login", %{
+      "admin_password" => password
+    })
   end
 end

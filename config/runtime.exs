@@ -13,6 +13,12 @@ config :receipts, :discord,
 
 config :receipts, :gemini, api_key: System.get_env("GEMINI_API_KEY")
 
+admin_password =
+  System.get_env("ADMIN_PASSWORD") ||
+    if(config_env() == :test, do: "test-admin-password", else: nil)
+
+config :receipts, :admin_password, admin_password
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
