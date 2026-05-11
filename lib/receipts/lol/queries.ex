@@ -366,7 +366,7 @@ defmodule Receipts.LoL.Queries do
       kda_ratio =
         if avg_deaths > 0,
           do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
-          else: Float.round(avg_kills + avg_assists, 2)
+          else: Float.round((avg_kills + avg_assists) / 1.0, 2)
 
       %{
         champion: champion,
@@ -439,7 +439,7 @@ defmodule Receipts.LoL.Queries do
       kda_ratio =
         if avg_deaths > 0,
           do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
-          else: Float.round(avg_kills + avg_assists, 2)
+          else: Float.round((avg_kills + avg_assists) / 1.0, 2)
 
       %{
         champion: champion,
@@ -906,7 +906,7 @@ defmodule Receipts.LoL.Queries do
 
     if deaths > 0,
       do: Float.round((kills + assists) / deaths, 2),
-      else: Float.round(kills + assists, 2)
+      else: Float.round((kills + assists) / 1.0, 2)
   end
 
   defp participant_kda_ratio(participant) do
@@ -916,7 +916,7 @@ defmodule Receipts.LoL.Queries do
 
     if deaths > 0,
       do: Float.round((kills + assists) / deaths, 2),
-      else: Float.round(kills + assists, 2)
+      else: Float.round((kills + assists) / 1.0, 2)
   end
 
   defp percentage(_wins, 0), do: 0.0
@@ -997,7 +997,7 @@ defmodule Receipts.LoL.Queries do
     kda_ratio =
       if avg_deaths > 0,
         do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
-        else: Float.round(avg_kills + avg_assists, 2)
+        else: Float.round((avg_kills + avg_assists) / 1.0, 2)
 
     position_stats =
       all_participants
