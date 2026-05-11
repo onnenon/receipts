@@ -3,6 +3,7 @@ defmodule ReceiptsWeb.PlayerLive do
 
   require Ash.Query
 
+  alias Receipts.AI.CompSuggestion
   alias Receipts.LoL.{Player, Champion, Queue}
   alias Receipts.LoL.Queries
 
@@ -95,6 +96,8 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:result, nil)
          |> assign(:results, [])
          |> assign(:player_results, %{})
+         |> assign(:comp_suggestion, nil)
+         |> assign(:comp_suggestion_error, nil)
          |> assign(:recent_queue_filter, nil)}
     end
   end
@@ -251,6 +254,61 @@ defmodule ReceiptsWeb.PlayerLive do
      socket |> assign(:from_year, from_year) |> assign(:to_year, to_year) |> maybe_rerun()}
   end
 
+  @impl true
+  def handle_event(
+        "suggest_comp",
+        _params,
+        %{assigns: %{admin_authenticated: true, comparison?: true}} = socket
+      ) do
+    %{
+      player_ids: player_ids,
+      shared_match_ids: shared_match_ids,
+      enabled_queues: enabled_queues,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    opts = [
+      queue_types: MapSet.to_list(enabled_queues),
+      from_year: from_year,
+      to_year: to_year,
+      match_ids: shared_match_ids
+    ]
+
+    case CompSuggestion.suggest(player_ids, opts) do
+      {:ok, suggestion} ->
+        {:noreply,
+         socket
+         |> assign(:comp_suggestion, suggestion)
+         |> assign(:comp_suggestion_error, nil)}
+
+      {:error, :missing_api_key} ->
+        {:noreply,
+         socket
+         |> assign(:comp_suggestion, nil)
+         |> assign(
+           :comp_suggestion_error,
+           "GEMINI_API_KEY is not configured for this environment."
+         )}
+
+      {:error, :not_enough_players} ->
+        {:noreply,
+         socket
+         |> assign(:comp_suggestion, nil)
+         |> assign(:comp_suggestion_error, "Select at least two players.")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:comp_suggestion, nil)
+         |> assign(:comp_suggestion_error, "Comp suggestion failed. Try again in a moment.")}
+    end
+  end
+
+  def handle_event("suggest_comp", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Comp suggestions are admin-only.")}
+  end
+
   defp maybe_rerun(socket) do
     socket = refresh_top_champions(socket)
 
@@ -343,6 +401,8 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:top_champions_by_player, top_champions_by_player)
     |> assign(:position_stats_by_player, position_stats_by_player)
     |> assign(:player_position_stats, player_position_stats)
+    |> assign(:comp_suggestion, nil)
+    |> assign(:comp_suggestion_error, nil)
   end
 
   defp run_query(socket) do
@@ -633,6 +693,10 @@ defmodule ReceiptsWeb.PlayerLive do
   defp win_rate_bg(rate) when rate >= 55.0, do: "bg-success/15 text-success border-success/30"
   defp win_rate_bg(rate) when rate < 45.0, do: "bg-error/15 text-error border-error/30"
   defp win_rate_bg(_), do: "bg-base-300/50 text-base-content/70 border-base-300"
+
+  defp confidence_badge_class("high"), do: "border-success/30 bg-success/15 text-success"
+  defp confidence_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
+  defp confidence_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
 
   defp rank_tier_glow(%{rank_tier: "CHALLENGER"}), do: "bg-yellow-300"
   defp rank_tier_glow(%{rank_tier: "GRANDMASTER"}), do: "bg-red-500"
@@ -1003,6 +1067,142 @@ defmodule ReceiptsWeb.PlayerLive do
             </div>
           <% end %>
         </div>
+
+        <%= if @comparison? && @admin_authenticated do %>
+          <section
+            id="comp-suggestion-panel"
+            class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm"
+          >
+            <div class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                  Comp Suggestion
+                </p>
+                <p class="text-xs text-base-content/40">
+                  Based on the current shared-game filters and recent individual games.
+                </p>
+              </div>
+              <button
+                id="suggest-comp-button"
+                type="button"
+                phx-click="suggest_comp"
+                class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90"
+              >
+                <.icon name="hero-sparkles-mini" class="h-4 w-4" />
+                Suggest Comp
+              </button>
+            </div>
+
+            <%= if @comp_suggestion_error do %>
+              <div
+                id="comp-suggestion-error"
+                class="border-t border-base-300 px-4 py-3 text-sm text-error"
+              >
+                {@comp_suggestion_error}
+              </div>
+            <% end %>
+
+            <%= if @comp_suggestion do %>
+              <div id="comp-suggestion-result" class="space-y-4 border-t border-base-300 px-4 py-4">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <p class="max-w-3xl text-sm leading-6 text-base-content/70">
+                    {@comp_suggestion["summary"]}
+                  </p>
+                  <span class={[
+                    "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
+                    confidence_badge_class(@comp_suggestion["confidence"])
+                  ]}>
+                    {@comp_suggestion["confidence"]} confidence
+                  </span>
+                </div>
+
+                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <%= for slot <- @comp_suggestion["recommended_lineup"] do %>
+                    <article
+                      id={"comp-slot-#{slot["player_id"]}"}
+                      class={[
+                        "rounded-xl border p-4",
+                        position_card_class(slot["position"])
+                      ]}
+                    >
+                      <div class="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 class="text-lg font-bold tracking-tight">{slot["player_name"]}</h3>
+                          <p class="text-sm font-semibold text-base-content/60">
+                            {slot["position_label"]}
+                          </p>
+                        </div>
+                        <span class={[
+                          "inline-flex rounded-md px-2 py-1 text-xs font-bold ring-1",
+                          position_badge_class(slot["position"])
+                        ]}>
+                          {slot["position"]}
+                        </span>
+                      </div>
+
+                      <%= if slot["champions"] != [] do %>
+                        <div class="mt-3 flex flex-wrap gap-1.5">
+                          <%= for champion <- slot["champions"] do %>
+                            <span class="rounded-md border border-base-300 bg-base-100/70 px-2 py-1 text-xs font-semibold text-base-content/70">
+                              {champion}
+                            </span>
+                          <% end %>
+                        </div>
+                      <% end %>
+
+                      <p class="mt-3 text-sm leading-6 text-base-content/70">
+                        {slot["reason"]}
+                      </p>
+
+                      <%= if slot["evidence"] != [] do %>
+                        <ul class="mt-3 space-y-1.5">
+                          <%= for evidence <- slot["evidence"] do %>
+                            <li class="flex gap-2 text-xs leading-5 text-base-content/55">
+                              <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
+                              </span>
+                              <span>{evidence}</span>
+                            </li>
+                          <% end %>
+                        </ul>
+                      <% end %>
+                    </article>
+                  <% end %>
+                </div>
+
+                <%= if @comp_suggestion["alternatives"] != [] do %>
+                  <div class="space-y-2">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      Alternatives
+                    </p>
+                    <div class="grid gap-2 md:grid-cols-2">
+                      <%= for alternative <- @comp_suggestion["alternatives"] do %>
+                        <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
+                          <p class="text-sm font-bold">{alternative["name"]}</p>
+                          <p class="mt-1 text-xs leading-5 text-base-content/55">
+                            {alternative["notes"]}
+                          </p>
+                        </div>
+                      <% end %>
+                    </div>
+                  </div>
+                <% end %>
+
+                <%= if @comp_suggestion["caveats"] != [] do %>
+                  <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      Caveats
+                    </p>
+                    <ul class="mt-2 space-y-1">
+                      <%= for caveat <- @comp_suggestion["caveats"] do %>
+                        <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
+                      <% end %>
+                    </ul>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          </section>
+        <% end %>
 
         <%!-- Champion roster (collapsible) --%>
         <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">

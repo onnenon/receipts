@@ -14,6 +14,10 @@ config :receipts,
   # How old (in minutes) an account's newest_synced_at must be before SweepAccounts re-enqueues it.
   sync_stale_minutes: 30
 
+config :receipts, :ai_client, Receipts.AI.Gemini
+
+config :receipts, :gemini, model: "gemini-2.5-flash"
+
 config :receipts, Oban,
   repo: Receipts.Repo,
   plugins: [

@@ -30,6 +30,7 @@ config :receipts, Oban, testing: :inline
 
 config :receipts, :riot_client, Receipts.RiotClientStub
 config :receipts, :data_dragon, Receipts.DataDragonStub
+config :receipts, :ai_client, Receipts.AIClientStub
 
 # Print only warnings and errors during test
 config :logger, level: :warning

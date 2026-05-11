@@ -52,6 +52,25 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     refute has_element?(view, "#receipts-result-#{player_a.id}", "20/1/3")
   end
 
+  test "comp suggestion button is admin only", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+
+    player_ids = "#{player_a.id},#{player_b.id}"
+
+    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+    refute has_element?(view, "#suggest-comp-button")
+
+    admin_conn = log_in_admin(conn)
+    {:ok, admin_view, _html} = live(admin_conn, ~p"/players?ids=#{player_ids}")
+    assert has_element?(admin_view, "#suggest-comp-button")
+
+    admin_view |> element("#suggest-comp-button") |> render_click()
+
+    assert has_element?(admin_view, "#comp-suggestion-result", "Koozie should play mid")
+    assert has_element?(admin_view, "#comp-suggestion-result", "Kupo")
+  end
+
   defp create_player(name) do
     Player
     |> Ash.Changeset.for_create(:create, %{name: name, discord_id: unique_id()})

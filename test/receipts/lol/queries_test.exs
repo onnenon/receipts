@@ -44,6 +44,40 @@ defmodule Receipts.LoL.QueriesTest do
            ]
   end
 
+  test "comp suggestion context includes shared and recent non-shared role evidence" do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+
+    account_a = create_account(player_a, "A")
+    account_b = create_account(player_b, "B")
+
+    ahri = create_champion("Ahri", 103)
+    lulu = create_champion("Lulu", 117)
+
+    shared_match = create_match("shared-comp", ~U[2026-05-10 12:00:00Z])
+    recent_solo_match = create_match("recent-solo", ~U[2026-05-10 13:00:00Z])
+
+    create_participant(account_a, shared_match, ahri, true, kills: 8, position: "MIDDLE")
+    create_participant(account_b, shared_match, lulu, true, kills: 1, position: "UTILITY")
+    create_participant(account_a, recent_solo_match, lulu, true, kills: 2, position: "UTILITY")
+
+    assert {:ok, context} =
+             Queries.comp_suggestion_context_for_players([player_a.id, player_b.id])
+
+    assert context.shared_games.count == 1
+
+    koozie = Enum.find(context.players, &(&1.id == player_a.id))
+    kupo = Enum.find(context.players, &(&1.id == player_b.id))
+
+    assert [%{position: "MIDDLE", games: 1, win_rate: 100.0}] = koozie.shared_positions
+    assert [%{position: "UTILITY", games: 1, win_rate: 100.0}] = kupo.shared_positions
+
+    assert [%{position: "UTILITY", games: 1, win_rate: 100.0}] =
+             koozie.recent_non_shared_positions
+
+    assert [%{champion: %{name: "Ahri"}}] = koozie.shared_top_champions
+  end
+
   defp create_player(name) do
     Player
     |> Ash.Changeset.for_create(:create, %{name: name, discord_id: unique_id()})
@@ -100,7 +134,7 @@ defmodule Receipts.LoL.QueriesTest do
       cs: 100,
       damage_dealt: 1000,
       vision_score: 10,
-      position: "MIDDLE",
+      position: Keyword.get(opts, :position, "MIDDLE"),
       items: [],
       game_datetime: match.game_datetime,
       queue_type: match.queue_type,
