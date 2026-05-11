@@ -46,7 +46,8 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:min_games, nil)
          |> assign(:filters_open, true)
          |> assign(:champions_open, true)
-         |> assign(:result, nil)}
+         |> assign(:result, nil)
+         |> assign(:recent_queue_filter, nil)}
     end
   end
 
@@ -140,6 +141,12 @@ defmodule ReceiptsWeb.PlayerLive do
   @impl true
   def handle_event("clear_queues", _, socket) do
     {:noreply, socket |> assign(:enabled_queues, MapSet.new()) |> maybe_rerun()}
+  end
+
+  @impl true
+  def handle_event("set_recent_queue_filter", %{"queue" => queue}, socket) do
+    filter = if queue == "", do: nil, else: queue
+    {:noreply, assign(socket, :recent_queue_filter, filter)}
   end
 
   @impl true
@@ -291,6 +298,31 @@ defmodule ReceiptsWeb.PlayerLive do
   defp champion_icon_url(champion) do
     "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/#{champion.riot_id}.png"
   end
+
+  defp champion_splash_url(champion) do
+    "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/#{champion.key}_0.jpg"
+  end
+
+  defp filter_recent_games(games, nil), do: games
+
+  defp filter_recent_games(games, queue_filter) do
+    Enum.filter(games, &(&1.match.queue_type == queue_filter))
+  end
+
+  defp position_label("TOP"), do: "Top"
+  defp position_label("JUNGLE"), do: "Jungle"
+  defp position_label("MIDDLE"), do: "Mid"
+  defp position_label("BOTTOM"), do: "Bot"
+  defp position_label("UTILITY"), do: "Support"
+  defp position_label(p) when is_binary(p), do: String.capitalize(String.downcase(p))
+  defp position_label(_), do: "Unknown"
+
+  defp position_badge_class("TOP"), do: "bg-amber-500/20 text-amber-400 ring-amber-500/20"
+  defp position_badge_class("JUNGLE"), do: "bg-emerald-500/20 text-emerald-400 ring-emerald-500/20"
+  defp position_badge_class("MIDDLE"), do: "bg-sky-500/20 text-sky-400 ring-sky-500/20"
+  defp position_badge_class("BOTTOM"), do: "bg-rose-500/20 text-rose-400 ring-rose-500/20"
+  defp position_badge_class("UTILITY"), do: "bg-violet-500/20 text-violet-400 ring-violet-500/20"
+  defp position_badge_class(_), do: "bg-base-300/50 text-base-content/50 ring-base-300/50"
 
   defp win_rate_color(rate) when rate >= 55.0, do: "text-success"
   defp win_rate_color(rate) when rate < 45.0, do: "text-error"
@@ -730,23 +762,43 @@ defmodule ReceiptsWeb.PlayerLive do
         <%!-- Results --%>
         <%= if @result do %>
           <div id="receipts-result" class="space-y-5">
-            <div class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-200 p-5 shadow-sm sm:flex-row sm:items-center">
+            <%!-- Title card — cinematic champion banner --%>
+            <div class="relative overflow-hidden rounded-2xl border border-white/10 shadow-2xl" style="min-height: 160px;">
+              <%!-- Splash art: img tag so it loads reliably, filter via inline style --%>
               <img
-                src={champion_icon_url(@result.champion)}
-                alt={@result.champion.name}
-                class="h-16 w-16 rounded-xl border-2 border-base-300 object-cover shadow-md"
+                src={champion_splash_url(@result.champion)}
+                alt=""
+                class="absolute inset-0 h-full w-full object-cover object-right scale-110 pointer-events-none select-none"
+                style="filter: blur(0px) brightness(0.45);"
                 onerror="this.style.display='none'"
               />
-              <div class="min-w-0 flex-1">
-                <p class="text-xs font-medium uppercase tracking-wide text-base-content/40">
-                  {@player.name} on
-                </p>
-                <h2 class="text-3xl font-bold tracking-tight">{@result.champion.name}</h2>
-                <%= if @result.games_played == 0 do %>
-                  <p class="mt-1 text-sm text-base-content/50">
-                    No games on record for the selected filters.
+              <%!-- Strong gradient from left keeps text legible while revealing art on right --%>
+              <div class="absolute inset-0 bg-gradient-to-r from-black/95 via-black/65 to-transparent"></div>
+              <%!-- Subtle bottom vignette --%>
+              <div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/50 to-transparent"></div>
+              <%!-- Content --%>
+              <div class="relative flex items-center gap-5 px-7 py-8">
+                <div class="relative shrink-0">
+                  <img
+                    src={champion_icon_url(@result.champion)}
+                    alt={@result.champion.name}
+                    class="h-20 w-20 rounded-2xl object-cover shadow-2xl ring-2 ring-white/20"
+                    onerror="this.style.display='none'"
+                  />
+                </div>
+                <div class="min-w-0">
+                  <p class="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/40">
+                    {@player.name} on
                   </p>
-                <% end %>
+                  <h2 class="text-5xl font-black leading-none tracking-tight text-white drop-shadow-lg">
+                    {@result.champion.name}
+                  </h2>
+                  <%= if @result.games_played == 0 do %>
+                    <p class="mt-2 text-sm text-white/40">
+                      No games on record for the selected filters.
+                    </p>
+                  <% end %>
+                </div>
               </div>
             </div>
 
@@ -783,40 +835,92 @@ defmodule ReceiptsWeb.PlayerLive do
               </div>
 
               <div class="space-y-2">
-                <h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
-                  Recent Games
-                </h3>
+                <% unique_queues = @result.recent_games |> Enum.map(& &1.match.queue_type) |> Enum.uniq() %>
+                <% filtered_games = filter_recent_games(@result.recent_games, @recent_queue_filter) %>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                    Recent Games
+                    <span class="ml-1 font-normal normal-case text-base-content/40">
+                      ({length(filtered_games)} of {length(@result.recent_games)})
+                    </span>
+                  </h3>
+                  <%= if length(unique_queues) > 1 do %>
+                    <div class="flex flex-wrap gap-1">
+                      <button
+                        phx-click="set_recent_queue_filter"
+                        phx-value-queue=""
+                        class={[
+                          "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                          if(is_nil(@recent_queue_filter),
+                            do: "bg-primary/80 text-primary-content",
+                            else: "bg-base-300 text-base-content/60 hover:bg-base-300/70"
+                          )
+                        ]}
+                      >All</button>
+                      <%= for queue_type <- unique_queues do %>
+                        <button
+                          phx-click="set_recent_queue_filter"
+                          phx-value-queue={queue_type}
+                          class={[
+                            "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                            if(@recent_queue_filter == queue_type,
+                              do: "bg-primary/80 text-primary-content",
+                              else: "bg-base-300 text-base-content/60 hover:bg-base-300/70"
+                            )
+                          ]}
+                        >{Queue.label(queue_type)}</button>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
                 <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
-                  <%= for game <- @result.recent_games do %>
-                    <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 last:border-b-0">
+                  <%= if filtered_games == [] do %>
+                    <div class="py-8 text-center text-sm text-base-content/40">
+                      No games match the selected filters.
+                    </div>
+                  <% end %>
+                  <%= for game <- filtered_games do %>
+                    <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 last:border-b-0 hover:bg-base-300/30 transition-colors">
+                      <%!-- Win/Loss indicator bar on left edge --%>
                       <div class={[
-                        "w-12 shrink-0 rounded text-center py-0.5 text-xs font-bold",
+                        "w-1 self-stretch rounded-full shrink-0",
+                        if(game.win, do: "bg-success", else: "bg-error")
+                      ]} />
+                      <%!-- WIN/LOSS badge --%>
+                      <div class={[
+                        "w-11 shrink-0 rounded-md py-1 text-center text-xs font-bold tracking-wide",
                         if(game.win,
-                          do: "bg-success/20 text-success",
-                          else: "bg-error/20 text-error"
+                          do: "bg-success/15 text-success",
+                          else: "bg-error/15 text-error"
                         )
                       ]}>
                         {if game.win, do: "WIN", else: "LOSS"}
                       </div>
                       <div class="min-w-0 flex-1">
-                        <p class="text-sm font-semibold">
-                          {game.kills}/{game.deaths}/{game.assists}
-                          <span class="font-normal text-base-content/40">·</span>
-                          {game.cs} CS
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <p class="text-sm font-semibold">
+                            {game.kills}/{game.deaths}/{game.assists}
+                            <span class="font-normal text-base-content/40 mx-0.5">·</span>
+                            {game.cs} CS
+                          </p>
                           <%= if game.position && game.position != "" do %>
-                            <span class="font-normal text-base-content/40">·</span>
-                            {game.position}
+                            <span class={[
+                              "inline-flex items-center rounded px-1.5 py-px text-xs font-bold uppercase tracking-wide ring-1",
+                              position_badge_class(game.position)
+                            ]}>
+                              {position_label(game.position)}
+                            </span>
                           <% end %>
-                        </p>
-                        <p class="text-xs text-base-content/40">
+                        </div>
+                        <p class="text-xs text-base-content/40 mt-0.5">
                           {Queue.label(game.match.queue_type)}
                         </p>
                       </div>
                       <div class="shrink-0 text-right">
-                        <p class="text-xs text-base-content/50">
+                        <p class="text-xs font-medium text-base-content/50">
                           {format_duration(game.match.game_duration_seconds)}
                         </p>
-                        <p class="text-xs text-base-content/40">
+                        <p class="text-xs text-base-content/35 mt-0.5">
                           {format_date(game.match.game_datetime)}
                         </p>
                       </div>

@@ -279,7 +279,7 @@ defmodule Receipts.LoL.Queries do
         |> Ash.Query.filter(queue_type in ^queue_types)
         |> apply_year_filters(from_year, to_year)
         |> Ash.Query.sort(game_datetime: :desc)
-        |> Ash.Query.limit(5)
+        |> Ash.Query.limit(20)
         |> Ash.Query.load(:match)
         |> Ash.read!()
       end
