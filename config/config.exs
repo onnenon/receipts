@@ -73,6 +73,12 @@ config :tailwind,
     cd: Path.expand("..", __DIR__)
   ]
 
+config :receipts, Receipts.PromEx,
+  manual_metrics_start_delay: :no_delay,
+  drop_metrics_groups: [],
+  grafana: :disabled,
+  metrics_server: :disabled
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",

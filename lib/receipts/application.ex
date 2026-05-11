@@ -15,6 +15,7 @@ defmodule Receipts.Application do
 
     children =
       [
+        Receipts.PromEx,
         ReceiptsWeb.Telemetry,
         Receipts.Repo,
         {Ecto.Migrator,

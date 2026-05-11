@@ -44,6 +44,10 @@ defmodule ReceiptsWeb.Router do
     get("/version", VersionController, :show)
   end
 
+  scope "/" do
+    get("/metrics", PromEx.Plug, prom_ex_module: Receipts.PromEx)
+  end
+
   if Application.compile_env(:receipts, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 
