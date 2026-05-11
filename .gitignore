@@ -15,6 +15,7 @@ erl_crash.dump
 *.db*
 .env
 .env.local
+deploy/receipts.env
 
 # Phoenix generated assets
 /priv/static/assets/
@@ -31,4 +32,3 @@ erl_crash.dump
 
 # Node modules (in case they are used in assets)
 /assets/node_modules/
-

@@ -36,6 +36,12 @@ defmodule ReceiptsWeb.Router do
     end
   end
 
+  scope "/", ReceiptsWeb do
+    pipe_through(:api)
+
+    get("/version", VersionController, :show)
+  end
+
   if Application.compile_env(:receipts, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 

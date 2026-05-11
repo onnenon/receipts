@@ -7,7 +7,12 @@ env =
     System.get_env()
   end
 
-get_env = &Map.get(env, &1)
+get_env = fn key ->
+  case Map.get(env, key) do
+    "" -> nil
+    value -> value
+  end
+end
 
 config :receipts, :riot, api_key: get_env.("RIOT_API_KEY")
 
@@ -77,11 +82,12 @@ if config_env() == :prod do
         """
     end
 
-  config :receipts, Receipts.Repo,
-    repo_config ++
-      [
-        pool_size: String.to_integer(get_env.("POOL_SIZE") || "10")
-      ]
+  config :receipts,
+         Receipts.Repo,
+         repo_config ++
+           [
+             pool_size: String.to_integer(get_env.("POOL_SIZE") || "10")
+           ]
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
@@ -99,14 +105,20 @@ if config_env() == :prod do
 
   config :receipts, :dns_cluster_query, get_env.("DNS_CLUSTER_QUERY")
 
+  bind_ip =
+    case get_env.("PHX_BIND_IPV4") do
+      "true" -> {0, 0, 0, 0}
+      _ -> {0, 0, 0, 0, 0, 0, 0, 0}
+    end
+
   config :receipts, ReceiptsWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
+      # Bind on all interfaces. Phoenix's generated default is IPv6-friendly;
+      # Docker bridge deployments can set PHX_BIND_IPV4=true.
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      # for details about IPv6 vs IPv4 and loopback vs public addresses.
+      ip: bind_ip
     ],
     secret_key_base: secret_key_base
 

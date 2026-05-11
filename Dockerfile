@@ -14,6 +14,7 @@
 ARG ELIXIR_VERSION=1.19.5
 ARG OTP_VERSION=28.5
 ARG DEBIAN_VERSION=trixie-20260505-slim
+ARG SOURCE_VERSION=unknown
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
@@ -69,6 +70,7 @@ RUN mix release
 # start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
 FROM ${RUNNER_IMAGE} AS final
+ARG SOURCE_VERSION=unknown
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates \
@@ -87,6 +89,7 @@ RUN chown nobody /app
 
 # set runner ENV
 ENV MIX_ENV="prod"
+ENV RECEIPTS_VERSION="${SOURCE_VERSION}"
 
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/receipts ./
