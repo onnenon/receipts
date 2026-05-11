@@ -4,7 +4,7 @@ defmodule ReceiptsWeb.PlayerLive do
   require Ash.Query
   require Logger
 
-  alias Receipts.AI.CompSuggestion
+  alias Receipts.AI.{CompSuggestion, WinLossAnalysis}
   alias Receipts.LoL.{Player, Champion, Queue}
   alias Receipts.LoL.Queries
 
@@ -103,10 +103,21 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:comp_suggestion_cached, false)
          |> assign(:comp_suggestion_history, [])
          |> assign(:comp_suggestion_history_open, false)
+         |> assign(:comp_suggestion_open, true)
          |> assign(:comp_suggestion_error, nil)
          |> assign(:comp_suggestion_loading, false)
+         |> assign(:win_loss_analysis, nil)
+         |> assign(:win_loss_analysis_record_id, nil)
+         |> assign(:win_loss_analysis_generated_at, nil)
+         |> assign(:win_loss_analysis_cached, false)
+         |> assign(:win_loss_analysis_history, [])
+         |> assign(:win_loss_analysis_history_open, false)
+         |> assign(:win_loss_analysis_open, true)
+         |> assign(:win_loss_analysis_error, nil)
+         |> assign(:win_loss_analysis_loading, false)
          |> assign(:recent_queue_filter, nil)
-         |> load_comp_suggestion_cache()}
+         |> load_comp_suggestion_cache()
+         |> load_win_loss_analysis_cache()}
     end
   end
 
@@ -296,6 +307,51 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   @impl true
+  def handle_event("toggle_comp_suggestion", _params, socket) do
+    {:noreply, assign(socket, :comp_suggestion_open, !socket.assigns.comp_suggestion_open)}
+  end
+
+  @impl true
+  def handle_event(
+        "analyze_win_loss",
+        _params,
+        %{assigns: %{admin_authenticated: true, comparison?: true}} = socket
+      ) do
+    %{
+      player_ids: player_ids,
+      shared_match_ids: shared_match_ids,
+      enabled_queues: enabled_queues,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    opts = [
+      queue_types: MapSet.to_list(enabled_queues),
+      from_year: from_year,
+      to_year: to_year,
+      match_ids: shared_match_ids,
+      force: true
+    ]
+
+    {:noreply,
+     socket
+     |> assign(:win_loss_analysis_error, nil)
+     |> assign(:win_loss_analysis_loading, true)
+     |> start_async(:win_loss_analysis, fn ->
+       WinLossAnalysis.fetch_or_generate(player_ids, opts)
+     end)}
+  end
+
+  def handle_event("analyze_win_loss", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Win/loss analysis is admin-only.")}
+  end
+
+  @impl true
+  def handle_event("toggle_win_loss_analysis", _params, socket) do
+    {:noreply, assign(socket, :win_loss_analysis_open, !socket.assigns.win_loss_analysis_open)}
+  end
+
+  @impl true
   def handle_event("toggle_comp_suggestion_history", _params, socket) do
     {:noreply,
      assign(
@@ -316,6 +372,30 @@ defmodule ReceiptsWeb.PlayerLive do
          socket
          |> assign_comp_suggestion(suggestion)
          |> assign(:comp_suggestion_error, nil)}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_win_loss_analysis_history", _params, socket) do
+    {:noreply,
+     assign(
+       socket,
+       :win_loss_analysis_history_open,
+       !socket.assigns.win_loss_analysis_history_open
+     )}
+  end
+
+  @impl true
+  def handle_event("view_win_loss_analysis", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.win_loss_analysis_history, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      analysis ->
+        {:noreply,
+         socket
+         |> assign_win_loss_analysis(analysis)
+         |> assign(:win_loss_analysis_error, nil)}
     end
   end
 
@@ -347,6 +427,34 @@ defmodule ReceiptsWeb.PlayerLive do
      |> assign(:comp_suggestion_loading, false)}
   end
 
+  @impl true
+  def handle_async(:win_loss_analysis, {:ok, {:ok, analysis}}, socket) do
+    {:noreply,
+     socket
+     |> assign_win_loss_analysis(analysis)
+     |> refresh_win_loss_analysis_history()
+     |> assign(:win_loss_analysis_error, nil)
+     |> assign(:win_loss_analysis_loading, false)}
+  end
+
+  def handle_async(:win_loss_analysis, {:ok, {:error, reason}}, socket) do
+    Logger.error("Win/loss analysis failed: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:win_loss_analysis_error, win_loss_analysis_error(reason))
+     |> assign(:win_loss_analysis_loading, false)}
+  end
+
+  def handle_async(:win_loss_analysis, {:exit, reason}, socket) do
+    Logger.error("Win/loss analysis task exited: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:win_loss_analysis_error, win_loss_analysis_error(:unknown))
+     |> assign(:win_loss_analysis_loading, false)}
+  end
+
   defp comp_suggestion_error(:missing_api_key),
     do: "GEMINI_API_KEY is not configured for this environment."
 
@@ -356,6 +464,16 @@ defmodule ReceiptsWeb.PlayerLive do
     do: "Gemini timed out while generating the comp suggestion. Try again in a moment."
 
   defp comp_suggestion_error(_reason), do: "Comp suggestion failed. Try again in a moment."
+
+  defp win_loss_analysis_error(:missing_api_key),
+    do: "GEMINI_API_KEY is not configured for this environment."
+
+  defp win_loss_analysis_error(:not_enough_players), do: "Select at least two players."
+
+  defp win_loss_analysis_error(%Req.TransportError{reason: :timeout}),
+    do: "Gemini timed out while generating the win/loss analysis. Try again in a moment."
+
+  defp win_loss_analysis_error(_reason), do: "Win/loss analysis failed. Try again in a moment."
 
   defp load_comp_suggestion_cache(socket) do
     if socket.assigns.comparison? && socket.assigns.admin_authenticated do
@@ -382,6 +500,31 @@ defmodule ReceiptsWeb.PlayerLive do
     end
   end
 
+  defp load_win_loss_analysis_cache(socket) do
+    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+      history = WinLossAnalysis.history(socket.assigns.player_ids, win_loss_analysis_opts(socket))
+      fresh = Enum.find(history, & &1.fresh?)
+
+      socket
+      |> assign(:win_loss_analysis_history, history)
+      |> assign_win_loss_analysis(fresh)
+    else
+      socket
+    end
+  end
+
+  defp refresh_win_loss_analysis_history(socket) do
+    if socket.assigns.comparison? && socket.assigns.admin_authenticated do
+      assign(
+        socket,
+        :win_loss_analysis_history,
+        WinLossAnalysis.history(socket.assigns.player_ids, win_loss_analysis_opts(socket))
+      )
+    else
+      socket
+    end
+  end
+
   defp assign_comp_suggestion(socket, nil) do
     socket
     |> assign(:comp_suggestion, nil)
@@ -396,6 +539,22 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:comp_suggestion_record_id, suggestion.id)
     |> assign(:comp_suggestion_generated_at, suggestion.generated_at)
     |> assign(:comp_suggestion_cached, suggestion.cached?)
+  end
+
+  defp assign_win_loss_analysis(socket, nil) do
+    socket
+    |> assign(:win_loss_analysis, nil)
+    |> assign(:win_loss_analysis_record_id, nil)
+    |> assign(:win_loss_analysis_generated_at, nil)
+    |> assign(:win_loss_analysis_cached, false)
+  end
+
+  defp assign_win_loss_analysis(socket, analysis) do
+    socket
+    |> assign(:win_loss_analysis, analysis.analysis)
+    |> assign(:win_loss_analysis_record_id, analysis.id)
+    |> assign(:win_loss_analysis_generated_at, analysis.generated_at)
+    |> assign(:win_loss_analysis_cached, analysis.cached?)
   end
 
   defp comp_suggestion_opts(socket) do
@@ -413,6 +572,8 @@ defmodule ReceiptsWeb.PlayerLive do
       match_ids: shared_match_ids
     ]
   end
+
+  defp win_loss_analysis_opts(socket), do: comp_suggestion_opts(socket)
 
   defp maybe_rerun(socket) do
     socket = refresh_top_champions(socket)
@@ -513,6 +674,13 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:comp_suggestion_loading, false)
     |> assign(:comp_suggestion_history_open, false)
     |> load_comp_suggestion_cache()
+    |> assign(:win_loss_analysis_record_id, nil)
+    |> assign(:win_loss_analysis_generated_at, nil)
+    |> assign(:win_loss_analysis_cached, false)
+    |> assign(:win_loss_analysis_error, nil)
+    |> assign(:win_loss_analysis_loading, false)
+    |> assign(:win_loss_analysis_history_open, false)
+    |> load_win_loss_analysis_cache()
   end
 
   defp run_query(socket) do
@@ -807,6 +975,15 @@ defmodule ReceiptsWeb.PlayerLive do
   defp confidence_badge_class("high"), do: "border-success/30 bg-success/15 text-success"
   defp confidence_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
   defp confidence_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
+
+  defp severity_badge_class("high"), do: "border-error/30 bg-error/15 text-error"
+  defp severity_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
+  defp severity_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
+
+  defp trend_badge_class("carrying"), do: "border-success/30 bg-success/15 text-success"
+  defp trend_badge_class("struggling"), do: "border-error/30 bg-error/15 text-error"
+  defp trend_badge_class("volatile"), do: "border-warning/30 bg-warning/15 text-warning"
+  defp trend_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
 
   defp rank_tier_glow(%{rank_tier: "CHALLENGER"}), do: "bg-yellow-300"
   defp rank_tier_glow(%{rank_tier: "GRANDMASTER"}), do: "bg-red-500"
@@ -1215,175 +1392,451 @@ defmodule ReceiptsWeb.PlayerLive do
                   </p>
                 <% end %>
               </div>
-              <button
-                id="suggest-comp-button"
-                type="button"
-                phx-click="suggest_comp"
-                disabled={@comp_suggestion_loading}
-                class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
-              >
-                <%= if @comp_suggestion_loading do %>
-                  <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
-                  Generating...
-                <% else %>
-                  <.icon name="hero-sparkles-mini" class="h-4 w-4" />
-                  <%= if @comp_suggestion do %>
-                    Generate Again
-                  <% else %>
-                    Suggest Comp
-                  <% end %>
+              <div class="flex shrink-0 items-center gap-2">
+                <%= if @comp_suggestion_open do %>
+                  <button
+                    id="suggest-comp-button"
+                    type="button"
+                    phx-click="suggest_comp"
+                    disabled={@comp_suggestion_loading}
+                    class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
+                  >
+                    <%= if @comp_suggestion_loading do %>
+                      <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
+                      Generating...
+                    <% else %>
+                      <.icon name="hero-sparkles-mini" class="h-4 w-4" />
+                      <%= if @comp_suggestion do %>
+                        Generate Again
+                      <% else %>
+                        Suggest Comp
+                      <% end %>
+                    <% end %>
+                  </button>
                 <% end %>
-              </button>
+                <button
+                  id="toggle-comp-suggestion"
+                  type="button"
+                  phx-click="toggle_comp_suggestion"
+                  aria-expanded={@comp_suggestion_open}
+                  aria-controls="comp-suggestion-content"
+                  class="flex h-9 w-9 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content"
+                >
+                  <.icon
+                    name={
+                      if @comp_suggestion_open,
+                        do: "hero-chevron-up-mini",
+                        else: "hero-chevron-down-mini"
+                    }
+                    class="h-4 w-4"
+                  />
+                </button>
+              </div>
             </div>
 
-            <%= if @comp_suggestion_loading do %>
-              <div
-                id="comp-suggestion-loading"
-                class="flex items-center gap-2 border-t border-base-300 px-4 py-3 text-sm text-base-content/55"
-              >
-                <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin text-primary" />
-                Building comp suggestion from shared games and recent role context.
-              </div>
-            <% end %>
-
-            <%= if @comp_suggestion_error do %>
-              <div
-                id="comp-suggestion-error"
-                class="border-t border-base-300 px-4 py-3 text-sm text-error"
-              >
-                {@comp_suggestion_error}
-              </div>
-            <% end %>
-
-            <%= if @comp_suggestion_history != [] do %>
-              <div class="border-t border-base-300 px-4 py-2.5">
-                <button
-                  id="toggle-comp-suggestion-history"
-                  type="button"
-                  phx-click="toggle_comp_suggestion_history"
-                  aria-expanded={@comp_suggestion_history_open}
-                  aria-controls="comp-suggestion-history"
-                  class="flex w-full items-center gap-3 text-left transition hover:opacity-80"
-                >
-                  <span class="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                    <.icon name="hero-clock-mini" class="h-4 w-4 shrink-0" />
-                    History
-                    <span class="text-base-content/35">({length(@comp_suggestion_history)})</span>
-                  </span>
-                  <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content">
-                    <.icon
-                      name={
-                        if @comp_suggestion_history_open,
-                          do: "hero-chevron-up-mini",
-                          else: "hero-chevron-down-mini"
-                      }
-                      class="h-4 w-4"
-                    />
-                  </span>
-                </button>
-
+            <div :if={@comp_suggestion_open} id="comp-suggestion-content">
+              <%= if @comp_suggestion_loading do %>
                 <div
-                  :if={@comp_suggestion_history_open}
-                  id="comp-suggestion-history"
-                  class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3"
+                  id="comp-suggestion-loading"
+                  class="flex items-center gap-2 border-t border-base-300 px-4 py-3 text-sm text-base-content/55"
                 >
-                  <%= for stored <- @comp_suggestion_history do %>
-                    <button
-                      id={"view-comp-suggestion-#{stored.id}"}
-                      type="button"
-                      phx-click="view_comp_suggestion"
-                      phx-value-id={stored.id}
-                      class={[
-                        "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
-                        if(@comp_suggestion_record_id == stored.id,
-                          do: "border-primary/50 bg-primary/10",
-                          else: "border-base-300 bg-base-100/50"
-                        )
-                      ]}
-                    >
-                      <span class="flex items-center justify-between gap-2">
-                        <span class="text-xs font-bold text-base-content/70">
-                          {format_datetime(stored.generated_at)}
-                        </span>
-                        <%= if stored.fresh? do %>
-                          <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
-                            Cached
+                  <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin text-primary" />
+                  Building comp suggestion from shared games and recent role context.
+                </div>
+              <% end %>
+
+              <%= if @comp_suggestion_error do %>
+                <div
+                  id="comp-suggestion-error"
+                  class="border-t border-base-300 px-4 py-3 text-sm text-error"
+                >
+                  {@comp_suggestion_error}
+                </div>
+              <% end %>
+
+              <%= if @comp_suggestion_history != [] do %>
+                <div class="border-t border-base-300 px-4 py-2.5">
+                  <button
+                    id="toggle-comp-suggestion-history"
+                    type="button"
+                    phx-click="toggle_comp_suggestion_history"
+                    aria-expanded={@comp_suggestion_history_open}
+                    aria-controls="comp-suggestion-history"
+                    class="flex w-full items-center gap-3 text-left transition hover:opacity-80"
+                  >
+                    <span class="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      <.icon name="hero-clock-mini" class="h-4 w-4 shrink-0" />
+                      History
+                      <span class="text-base-content/35">({length(@comp_suggestion_history)})</span>
+                    </span>
+                    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content">
+                      <.icon
+                        name={
+                          if @comp_suggestion_history_open,
+                            do: "hero-chevron-up-mini",
+                            else: "hero-chevron-down-mini"
+                        }
+                        class="h-4 w-4"
+                      />
+                    </span>
+                  </button>
+
+                  <div
+                    :if={@comp_suggestion_history_open}
+                    id="comp-suggestion-history"
+                    class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3"
+                  >
+                    <%= for stored <- @comp_suggestion_history do %>
+                      <button
+                        id={"view-comp-suggestion-#{stored.id}"}
+                        type="button"
+                        phx-click="view_comp_suggestion"
+                        phx-value-id={stored.id}
+                        class={[
+                          "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
+                          if(@comp_suggestion_record_id == stored.id,
+                            do: "border-primary/50 bg-primary/10",
+                            else: "border-base-300 bg-base-100/50"
+                          )
+                        ]}
+                      >
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="text-xs font-bold text-base-content/70">
+                            {format_datetime(stored.generated_at)}
                           </span>
+                          <%= if stored.fresh? do %>
+                            <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
+                              Cached
+                            </span>
+                          <% end %>
+                        </span>
+                        <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
+                          {stored.suggestion["summary"]}
+                        </span>
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+
+              <%= if @comp_suggestion do %>
+                <div id="comp-suggestion-result" class="space-y-4 border-t border-base-300 px-4 py-4">
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p class="max-w-3xl text-sm leading-6 text-base-content/70">
+                        {@comp_suggestion["summary"]}
+                      </p>
+                      <p
+                        :if={@comp_suggestion_generated_at}
+                        id="comp-suggestion-generated-at"
+                        class="mt-1 text-xs text-base-content/40"
+                      >
+                        Generated {format_datetime(@comp_suggestion_generated_at)}
+                      </p>
+                    </div>
+                    <span class={[
+                      "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
+                      confidence_badge_class(@comp_suggestion["confidence"])
+                    ]}>
+                      {@comp_suggestion["confidence"]} confidence
+                    </span>
+                  </div>
+
+                  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <%= for slot <- @comp_suggestion["recommended_lineup"] do %>
+                      <article
+                        id={"comp-slot-#{slot["player_id"]}"}
+                        class={[
+                          "rounded-xl border p-4",
+                          position_card_class(slot["position"])
+                        ]}
+                      >
+                        <div class="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 class="text-lg font-bold tracking-tight">{slot["player_name"]}</h3>
+                            <p class="text-sm font-semibold text-base-content/60">
+                              {slot["position_label"]}
+                            </p>
+                          </div>
+                          <span class={[
+                            "inline-flex rounded-md px-2 py-1 text-xs font-bold ring-1",
+                            position_badge_class(slot["position"])
+                          ]}>
+                            {slot["position_label"]}
+                          </span>
+                        </div>
+
+                        <%= if slot["champions"] != [] do %>
+                          <div class="mt-3 flex flex-wrap gap-1.5">
+                            <%= for champion <- slot["champions"] do %>
+                              <span class="rounded-md border border-base-300 bg-base-100/70 px-2 py-1 text-xs font-semibold text-base-content/70">
+                                {champion}
+                              </span>
+                            <% end %>
+                          </div>
                         <% end %>
-                      </span>
-                      <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
-                        {stored.suggestion["summary"]}
-                      </span>
-                    </button>
+
+                        <p class="mt-3 text-sm leading-6 text-base-content/70">
+                          {slot["reason"]}
+                        </p>
+
+                        <%= if slot["evidence"] != [] do %>
+                          <ul class="mt-3 space-y-1.5">
+                            <%= for evidence <- slot["evidence"] do %>
+                              <li class="flex gap-2 text-xs leading-5 text-base-content/55">
+                                <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
+                                </span>
+                                <span>{evidence}</span>
+                              </li>
+                            <% end %>
+                          </ul>
+                        <% end %>
+                      </article>
+                    <% end %>
+                  </div>
+
+                  <%= if @comp_suggestion["alternatives"] != [] do %>
+                    <div class="space-y-2">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                        Alternatives
+                      </p>
+                      <div class="grid gap-3 md:grid-cols-2">
+                        <%= for alternative <- @comp_suggestion["alternatives"] do %>
+                          <div class="space-y-3 rounded-xl border border-base-300 bg-base-100/60 p-3">
+                            <p class="text-sm font-bold">{alternative["name"]}</p>
+                            <p class="mt-1 text-xs leading-5 text-base-content/55">
+                              {alternative["notes"]}
+                            </p>
+                            <%= if alternative["lineup"] != [] do %>
+                              <div class="grid gap-1.5">
+                                <%= for slot <- alternative["lineup"] do %>
+                                  <div class="flex items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-200/70 px-2.5 py-2">
+                                    <span class="truncate text-xs font-semibold text-base-content/75">
+                                      {slot["player_name"]}
+                                    </span>
+                                    <span class={[
+                                      "shrink-0 rounded px-1.5 py-px text-xs font-bold ring-1",
+                                      position_badge_class(slot["position"])
+                                    ]}>
+                                      {slot["position_label"]}
+                                    </span>
+                                  </div>
+                                <% end %>
+                              </div>
+                            <% else %>
+                              <p class="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-warning">
+                                Gemini did not return a full lineup for this alternative.
+                              </p>
+                            <% end %>
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+
+                  <%= if @comp_suggestion["caveats"] != [] do %>
+                    <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                        Caveats
+                      </p>
+                      <ul class="mt-2 space-y-1">
+                        <%= for caveat <- @comp_suggestion["caveats"] do %>
+                          <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
+                        <% end %>
+                      </ul>
+                    </div>
                   <% end %>
                 </div>
-              </div>
-            <% end %>
+              <% end %>
+            </div>
+          </section>
+        <% end %>
 
-            <%= if @comp_suggestion do %>
-              <div id="comp-suggestion-result" class="space-y-4 border-t border-base-300 px-4 py-4">
+        <%= if @comparison? && @admin_authenticated do %>
+          <section
+            id="win-loss-analysis-panel"
+            class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm"
+          >
+            <div class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                  Game Analysis
+                </p>
+                <p class="text-xs text-base-content/40">
+                  Reviews recent shared games, stat lines, carries, and weak points.
+                </p>
+                <%= if @win_loss_analysis_cached && @win_loss_analysis_generated_at do %>
+                  <p id="win-loss-analysis-cache-date" class="mt-1 text-xs font-medium text-primary">
+                    Cached analysis generated {format_datetime(@win_loss_analysis_generated_at)}.
+                  </p>
+                <% end %>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <%= if @win_loss_analysis_open do %>
+                  <button
+                    id="analyze-win-loss-button"
+                    type="button"
+                    phx-click="analyze_win_loss"
+                    disabled={@win_loss_analysis_loading}
+                    class="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
+                  >
+                    <%= if @win_loss_analysis_loading do %>
+                      <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
+                      Analyzing...
+                    <% else %>
+                      <.icon name="hero-chart-bar-square-mini" class="h-4 w-4" />
+                      <%= if @win_loss_analysis do %>
+                        Analyze Again
+                      <% else %>
+                        Analyze Games
+                      <% end %>
+                    <% end %>
+                  </button>
+                <% end %>
+                <button
+                  id="toggle-win-loss-analysis"
+                  type="button"
+                  phx-click="toggle_win_loss_analysis"
+                  aria-expanded={@win_loss_analysis_open}
+                  aria-controls="win-loss-analysis-content"
+                  class="flex h-9 w-9 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content"
+                >
+                  <.icon
+                    name={
+                      if @win_loss_analysis_open,
+                        do: "hero-chevron-up-mini",
+                        else: "hero-chevron-down-mini"
+                    }
+                    class="h-4 w-4"
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div :if={@win_loss_analysis_open} id="win-loss-analysis-content">
+              <%= if @win_loss_analysis_loading do %>
+                <div
+                  id="win-loss-analysis-loading"
+                  class="flex items-center gap-2 border-t border-base-300 px-4 py-3 text-sm text-base-content/55"
+                >
+                  <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin text-primary" />
+                  Reading recent shared games and player stat lines.
+                </div>
+              <% end %>
+
+              <%= if @win_loss_analysis_error do %>
+                <div
+                  id="win-loss-analysis-error"
+                  class="border-t border-base-300 px-4 py-3 text-sm text-error"
+                >
+                  {@win_loss_analysis_error}
+                </div>
+              <% end %>
+
+              <%= if @win_loss_analysis_history != [] do %>
+                <div class="border-t border-base-300 px-4 py-2.5">
+                  <button
+                    id="toggle-win-loss-analysis-history"
+                    type="button"
+                    phx-click="toggle_win_loss_analysis_history"
+                    aria-expanded={@win_loss_analysis_history_open}
+                    aria-controls="win-loss-analysis-history"
+                    class="flex w-full items-center gap-3 text-left transition hover:opacity-80"
+                  >
+                    <span class="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      <.icon name="hero-clock-mini" class="h-4 w-4 shrink-0" />
+                      History
+                      <span class="text-base-content/35">({length(@win_loss_analysis_history)})</span>
+                    </span>
+                    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content">
+                      <.icon
+                        name={
+                          if @win_loss_analysis_history_open,
+                            do: "hero-chevron-up-mini",
+                            else: "hero-chevron-down-mini"
+                        }
+                        class="h-4 w-4"
+                      />
+                    </span>
+                  </button>
+
+                  <div
+                    :if={@win_loss_analysis_history_open}
+                    id="win-loss-analysis-history"
+                    class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3"
+                  >
+                    <%= for stored <- @win_loss_analysis_history do %>
+                      <button
+                        id={"view-win-loss-analysis-#{stored.id}"}
+                        type="button"
+                        phx-click="view_win_loss_analysis"
+                        phx-value-id={stored.id}
+                        class={[
+                          "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
+                          if(@win_loss_analysis_record_id == stored.id,
+                            do: "border-primary/50 bg-primary/10",
+                            else: "border-base-300 bg-base-100/50"
+                          )
+                        ]}
+                      >
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="text-xs font-bold text-base-content/70">
+                            {format_datetime(stored.generated_at)}
+                          </span>
+                          <%= if stored.fresh? do %>
+                            <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
+                              Cached
+                            </span>
+                          <% end %>
+                        </span>
+                        <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
+                          {stored.analysis["summary"]}
+                        </span>
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+
+              <%= if @win_loss_analysis do %>
+                <div id="win-loss-analysis-result" class="space-y-4 border-t border-base-300 px-4 py-4">
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p class="max-w-3xl text-sm leading-6 text-base-content/70">
-                      {@comp_suggestion["summary"]}
+                      {@win_loss_analysis["summary"]}
                     </p>
                     <p
-                      :if={@comp_suggestion_generated_at}
-                      id="comp-suggestion-generated-at"
+                      :if={@win_loss_analysis_generated_at}
+                      id="win-loss-analysis-generated-at"
                       class="mt-1 text-xs text-base-content/40"
                     >
-                      Generated {format_datetime(@comp_suggestion_generated_at)}
+                      Generated {format_datetime(@win_loss_analysis_generated_at)}
                     </p>
                   </div>
                   <span class={[
                     "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
-                    confidence_badge_class(@comp_suggestion["confidence"])
+                    confidence_badge_class(@win_loss_analysis["confidence"])
                   ]}>
-                    {@comp_suggestion["confidence"]} confidence
+                    {@win_loss_analysis["confidence"]} confidence
                   </span>
                 </div>
 
-                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <%= for slot <- @comp_suggestion["recommended_lineup"] do %>
-                    <article
-                      id={"comp-slot-#{slot["player_id"]}"}
-                      class={[
-                        "rounded-xl border p-4",
-                        position_card_class(slot["position"])
-                      ]}
-                    >
-                      <div class="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 class="text-lg font-bold tracking-tight">{slot["player_name"]}</h3>
-                          <p class="text-sm font-semibold text-base-content/60">
-                            {slot["position_label"]}
-                          </p>
+                <%= if @win_loss_analysis["loss_causes"] != [] do %>
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <%= for cause <- @win_loss_analysis["loss_causes"] do %>
+                      <article class="rounded-xl border border-base-300 bg-base-100/60 p-4">
+                        <div class="flex items-start justify-between gap-3">
+                          <h3 class="text-sm font-bold">{cause["title"]}</h3>
+                          <span class={[
+                            "rounded-md border px-2 py-0.5 text-xs font-bold capitalize",
+                            severity_badge_class(cause["severity"])
+                          ]}>
+                            {cause["severity"]}
+                          </span>
                         </div>
-                        <span class={[
-                          "inline-flex rounded-md px-2 py-1 text-xs font-bold ring-1",
-                          position_badge_class(slot["position"])
-                        ]}>
-                          {slot["position_label"]}
-                        </span>
-                      </div>
-
-                      <%= if slot["champions"] != [] do %>
-                        <div class="mt-3 flex flex-wrap gap-1.5">
-                          <%= for champion <- slot["champions"] do %>
-                            <span class="rounded-md border border-base-300 bg-base-100/70 px-2 py-1 text-xs font-semibold text-base-content/70">
-                              {champion}
-                            </span>
-                          <% end %>
-                        </div>
-                      <% end %>
-
-                      <p class="mt-3 text-sm leading-6 text-base-content/70">
-                        {slot["reason"]}
-                      </p>
-
-                      <%= if slot["evidence"] != [] do %>
+                        <p class="mt-2 text-sm leading-6 text-base-content/65">{cause["details"]}</p>
                         <ul class="mt-3 space-y-1.5">
-                          <%= for evidence <- slot["evidence"] do %>
+                          <%= for evidence <- cause["evidence"] do %>
                             <li class="flex gap-2 text-xs leading-5 text-base-content/55">
                               <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
                               </span>
@@ -1391,64 +1844,95 @@ defmodule ReceiptsWeb.PlayerLive do
                             </li>
                           <% end %>
                         </ul>
-                      <% end %>
-                    </article>
-                  <% end %>
-                </div>
+                      </article>
+                    <% end %>
+                  </div>
+                <% end %>
 
-                <%= if @comp_suggestion["alternatives"] != [] do %>
+                <%= if @win_loss_analysis["player_readouts"] != [] do %>
                   <div class="space-y-2">
                     <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                      Alternatives
+                      Player Readouts
                     </p>
-                    <div class="grid gap-3 md:grid-cols-2">
-                      <%= for alternative <- @comp_suggestion["alternatives"] do %>
-                        <div class="space-y-3 rounded-xl border border-base-300 bg-base-100/60 p-3">
-                          <p class="text-sm font-bold">{alternative["name"]}</p>
-                          <p class="mt-1 text-xs leading-5 text-base-content/55">
-                            {alternative["notes"]}
+                    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <%= for readout <- @win_loss_analysis["player_readouts"] do %>
+                        <article
+                          id={"win-loss-player-#{readout["player_id"]}"}
+                          class="rounded-xl border border-base-300 bg-base-100/60 p-4"
+                        >
+                          <div class="flex items-start justify-between gap-3">
+                            <h3 class="text-lg font-bold tracking-tight">{readout["player_name"]}</h3>
+                            <span class={[
+                              "rounded-md border px-2 py-0.5 text-xs font-bold capitalize",
+                              trend_badge_class(readout["trend"])
+                            ]}>
+                              {readout["trend"]}
+                            </span>
+                          </div>
+                          <p class="mt-2 text-sm leading-6 text-base-content/70">
+                            {readout["verdict"]}
                           </p>
-                          <%= if alternative["lineup"] != [] do %>
-                            <div class="grid gap-1.5">
-                              <%= for slot <- alternative["lineup"] do %>
-                                <div class="flex items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-200/70 px-2.5 py-2">
-                                  <span class="truncate text-xs font-semibold text-base-content/75">
-                                    {slot["player_name"]}
-                                  </span>
-                                  <span class={[
-                                    "shrink-0 rounded px-1.5 py-px text-xs font-bold ring-1",
-                                    position_badge_class(slot["position"])
-                                  ]}>
-                                    {slot["position_label"]}
-                                  </span>
-                                </div>
-                              <% end %>
-                            </div>
-                          <% else %>
-                            <p class="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-warning">
-                              Gemini did not return a full lineup for this alternative.
-                            </p>
-                          <% end %>
+                          <ul class="mt-3 space-y-1.5">
+                            <%= for evidence <- readout["evidence"] do %>
+                              <li class="flex gap-2 text-xs leading-5 text-base-content/55">
+                                <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35">
+                                </span>
+                                <span>{evidence}</span>
+                              </li>
+                            <% end %>
+                          </ul>
+                        </article>
+                      <% end %>
+                    </div>
+                  </div>
+                <% end %>
+
+                <%= if @win_loss_analysis["carry_highlights"] != [] do %>
+                  <div class="rounded-xl border border-success/30 bg-success/10 p-3">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-success">
+                      Carry Highlights
+                    </p>
+                    <div class="mt-2 grid gap-2 md:grid-cols-2">
+                      <%= for highlight <- @win_loss_analysis["carry_highlights"] do %>
+                        <div>
+                          <p class="text-sm font-bold">{highlight["title"]}</p>
+                          <p class="mt-1 text-xs leading-5 text-base-content/60">
+                            {highlight["details"]}
+                          </p>
                         </div>
                       <% end %>
                     </div>
                   </div>
                 <% end %>
 
-                <%= if @comp_suggestion["caveats"] != [] do %>
+                <%= if @win_loss_analysis["recommendations"] != [] do %>
+                  <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      Adjustments
+                    </p>
+                    <ul class="mt-2 space-y-1">
+                      <%= for recommendation <- @win_loss_analysis["recommendations"] do %>
+                        <li class="text-xs leading-5 text-base-content/55">{recommendation}</li>
+                      <% end %>
+                    </ul>
+                  </div>
+                <% end %>
+
+                <%= if @win_loss_analysis["caveats"] != [] do %>
                   <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
                     <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
                       Caveats
                     </p>
                     <ul class="mt-2 space-y-1">
-                      <%= for caveat <- @comp_suggestion["caveats"] do %>
+                      <%= for caveat <- @win_loss_analysis["caveats"] do %>
                         <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
                       <% end %>
                     </ul>
                   </div>
                 <% end %>
-              </div>
-            <% end %>
+                </div>
+              <% end %>
+            </div>
           </section>
         <% end %>
 
