@@ -74,6 +74,10 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     assert has_element?(admin_view, "#comp-suggestion-result", "Koozie should play mid")
     assert has_element?(admin_view, "#comp-suggestion-result", "Kupo")
+    assert has_element?(admin_view, "#comp-suggestion-result", "Recent mid: 24 games")
+    assert has_element?(admin_view, "#comp-suggestion-result", "Safer lane setup")
+    assert has_element?(admin_view, "#comp-suggestion-result", "Support")
+    refute has_element?(admin_view, "#comp-suggestion-result", "recent_non_shared_positions")
   end
 
   defp create_player(name) do

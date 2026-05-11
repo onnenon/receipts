@@ -42,7 +42,14 @@ defmodule Receipts.AI.Gemini do
       }
     }
 
-    case Req.post(url, headers: [{"x-goog-api-key", api_key}], json: body) do
+    request_opts = [
+      headers: [{"x-goog-api-key", api_key}],
+      json: body,
+      connect_options: [timeout: Keyword.get(opts, :connect_timeout, 10_000)],
+      receive_timeout: Keyword.get(opts, :receive_timeout, 60_000)
+    ]
+
+    case Req.post(url, request_opts) do
       {:ok, %{status: status, body: response}} when status in 200..299 ->
         response
         |> response_text()

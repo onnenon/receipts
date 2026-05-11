@@ -24,8 +24,13 @@ defmodule Receipts.AI.CompSuggestion do
       Use only the supplied JSON. Recommend one primary position per player.
       Prefer evidence from shared games, then recent non-shared games, then overall games.
       Be explicit about low sample sizes. Do not invent player history or champion stats.
+      Write user-facing prose. Never include raw JSON path names, snake_case keys, or dotted
+      references like recent_non_shared_positions.MIDDLE in the response.
+      Each alternative must include a complete lineup with one slot for every selected player.
       """,
-      temperature: 0.25
+      temperature: 0.25,
+      connect_timeout: 10_000,
+      receive_timeout: 90_000
     ]
   end
 
@@ -60,6 +65,7 @@ defmodule Receipts.AI.CompSuggestion do
               notes: %{type: "STRING"},
               lineup: %{type: "ARRAY", items: lineup_slot_schema()}
             },
+            required: ["name", "notes", "lineup"],
             propertyOrdering: ["name", "notes", "lineup"]
           }
         },
@@ -135,8 +141,33 @@ defmodule Receipts.AI.CompSuggestion do
         Map.get(slot, "position_label", position_label(Map.get(slot, "position"))),
       "champions" => Map.get(slot, "champions", []),
       "reason" => Map.get(slot, "reason", ""),
-      "evidence" => Map.get(slot, "evidence", [])
+      "evidence" => Enum.map(Map.get(slot, "evidence", []), &humanize_evidence/1)
     }
+  end
+
+  defp humanize_evidence(evidence) when is_binary(evidence) do
+    evidence
+    |> String.replace("recent_non_shared_positions.", "Recent ")
+    |> String.replace("recent_non_shared_top_champions.", "Recent ")
+    |> String.replace("shared_positions.", "Shared ")
+    |> String.replace("shared_top_champions.", "Shared ")
+    |> String.replace("overall_positions.", "Overall ")
+    |> String.replace("overall_top_champions.", "Overall ")
+    |> String.replace("_", " ")
+    |> String.replace(~r/\bTOP\b/, "top")
+    |> String.replace(~r/\bJUNGLE\b/, "jungle")
+    |> String.replace(~r/\bMIDDLE\b/, "mid")
+    |> String.replace(~r/\bBOTTOM\b/, "bot")
+    |> String.replace(~r/\bUTILITY\b/, "support")
+    |> capitalize_first()
+  end
+
+  defp humanize_evidence(evidence), do: evidence
+
+  defp capitalize_first(""), do: ""
+
+  defp capitalize_first(<<first::utf8, rest::binary>>) do
+    String.upcase(<<first::utf8>>) <> rest
   end
 
   defp position_label("TOP"), do: "Top"

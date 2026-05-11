@@ -2,6 +2,7 @@ defmodule ReceiptsWeb.PlayerLive do
   use ReceiptsWeb, :live_view
 
   require Ash.Query
+  require Logger
 
   alias Receipts.AI.CompSuggestion
   alias Receipts.LoL.{Player, Champion, Queue}
@@ -298,6 +299,8 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   def handle_async(:comp_suggestion, {:ok, {:error, reason}}, socket) do
+    Logger.error("Comp suggestion failed: #{inspect(reason)}")
+
     {:noreply,
      socket
      |> assign(:comp_suggestion, nil)
@@ -305,7 +308,9 @@ defmodule ReceiptsWeb.PlayerLive do
      |> assign(:comp_suggestion_loading, false)}
   end
 
-  def handle_async(:comp_suggestion, {:exit, _reason}, socket) do
+  def handle_async(:comp_suggestion, {:exit, reason}, socket) do
+    Logger.error("Comp suggestion task exited: #{inspect(reason)}")
+
     {:noreply,
      socket
      |> assign(:comp_suggestion, nil)
@@ -317,6 +322,9 @@ defmodule ReceiptsWeb.PlayerLive do
     do: "GEMINI_API_KEY is not configured for this environment."
 
   defp comp_suggestion_error(:not_enough_players), do: "Select at least two players."
+
+  defp comp_suggestion_error(%Req.TransportError{reason: :timeout}),
+    do: "Gemini timed out while generating the comp suggestion. Try again in a moment."
 
   defp comp_suggestion_error(_reason), do: "Comp suggestion failed. Try again in a moment."
 
@@ -1202,13 +1210,34 @@ defmodule ReceiptsWeb.PlayerLive do
                     <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
                       Alternatives
                     </p>
-                    <div class="grid gap-2 md:grid-cols-2">
+                    <div class="grid gap-3 md:grid-cols-2">
                       <%= for alternative <- @comp_suggestion["alternatives"] do %>
-                        <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
+                        <div class="space-y-3 rounded-xl border border-base-300 bg-base-100/60 p-3">
                           <p class="text-sm font-bold">{alternative["name"]}</p>
                           <p class="mt-1 text-xs leading-5 text-base-content/55">
                             {alternative["notes"]}
                           </p>
+                          <%= if alternative["lineup"] != [] do %>
+                            <div class="grid gap-1.5">
+                              <%= for slot <- alternative["lineup"] do %>
+                                <div class="flex items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-200/70 px-2.5 py-2">
+                                  <span class="truncate text-xs font-semibold text-base-content/75">
+                                    {slot["player_name"]}
+                                  </span>
+                                  <span class={[
+                                    "shrink-0 rounded px-1.5 py-px text-xs font-bold ring-1",
+                                    position_badge_class(slot["position"])
+                                  ]}>
+                                    {slot["position_label"]}
+                                  </span>
+                                </div>
+                              <% end %>
+                            </div>
+                          <% else %>
+                            <p class="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-warning">
+                              Gemini did not return a full lineup for this alternative.
+                            </p>
+                          <% end %>
                         </div>
                       <% end %>
                     </div>
