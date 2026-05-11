@@ -804,6 +804,19 @@ defmodule ReceiptsWeb.PlayerLive do
   defp player_path(%{player: player}, champion_key),
     do: ~p"/players/#{player.id}?champion=#{champion_key}"
 
+  defp comp_prompt_lab_path(assigns) do
+    query =
+      [
+        ids: Enum.join(assigns.player_ids, ","),
+        queues: assigns.enabled_queues |> MapSet.to_list() |> Enum.sort() |> Enum.join(","),
+        from_year: assigns.from_year,
+        to_year: assigns.to_year
+      ]
+      |> Enum.reject(fn {_key, value} -> is_nil(value) || value == "" end)
+
+    ~p"/players/compare/prompt-lab?#{query}"
+  end
+
   @tier_order ~w(IRON BRONZE SILVER GOLD PLATINUM EMERALD DIAMOND MASTER GRANDMASTER CHALLENGER)
   @division_order ~w(IV III II I)
 
@@ -1416,16 +1429,24 @@ defmodule ReceiptsWeb.PlayerLive do
                     Cached suggestion generated {format_datetime(@comp_suggestion_generated_at)}.
                   </p>
                 <% end %>
-              </div>
-              <div class="flex shrink-0 items-center gap-2">
-                <%= if @comp_suggestion_open do %>
-                  <%= if @admin_authenticated do %>
-                    <button
-                      id="suggest-comp-button"
-                      type="button"
-                      phx-click="suggest_comp"
-                      disabled={@comp_suggestion_loading}
-                      class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
+               </div>
+               <div class="flex shrink-0 items-center gap-2">
+                 <%= if @comp_suggestion_open do %>
+                   <%= if @admin_authenticated do %>
+                     <.link
+                       id="toggle-comp-prompt-lab"
+                       navigate={comp_prompt_lab_path(assigns)}
+                       class="inline-flex items-center justify-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm font-bold text-base-content/65 shadow-sm transition hover:border-base-content/20 hover:text-base-content"
+                     >
+                       <.icon name="hero-beaker-mini" class="h-4 w-4" />
+                       Prompt Lab
+                     </.link>
+                     <button
+                       id="suggest-comp-button"
+                       type="button"
+                       phx-click="suggest_comp"
+                       disabled={@comp_suggestion_loading}
+                       class="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-65"
                     >
                       <%= if @comp_suggestion_loading do %>
                         <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />

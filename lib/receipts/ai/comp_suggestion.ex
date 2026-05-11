@@ -3,10 +3,101 @@ defmodule Receipts.AI.CompSuggestion do
 
   require Ash.Query
 
-  alias Receipts.LoL.{CompSuggestionCache, Queries, Queue}
+  alias Receipts.LoL.{CompPromptLabRun, CompSuggestionCache, Queries, Queue}
 
   @positions ~w(TOP JUNGLE MIDDLE BOTTOM UTILITY)
   @cache_ttl_seconds 86_400
+  @default_temperature 0.25
+  @context_placeholder "{{context_json}}"
+  @default_system_instruction """
+  You are helping a private League of Legends friend group choose roles and champions.
+  Use only the supplied JSON. Recommend one primary position per player.
+  Prefer meaningful evidence from shared games, then recent non-shared games, then overall games.
+  When a player's shared-game champion pool has mostly low games_played samples, favor his
+  recent non-shared champion and position results over weak shared champion samples.
+  Be explicit about low sample sizes. Do not invent player history or champion stats.
+  All players in this friend group are men; use he/him/his pronouns for every player.
+  Write user-facing prose. Never include raw JSON path names, snake_case keys, or dotted
+  references like recent_non_shared_positions.MIDDLE in the response.
+  Each alternative must include a complete lineup with one slot for every selected player.
+  """
+  @default_prompt_template """
+  Generate a comp suggestion for this selected group.
+
+  Return JSON matching the schema. Use player_id values exactly as provided.
+  Valid positions are TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY.
+  If shared_top_champions or shared position champion samples are thin for a player, lean on
+  recent_non_shared_top_champions and recent_non_shared_positions for that player's role and
+  champion recommendations, while calling out the small shared sample in the evidence or caveats.
+
+  Context:
+  #{@context_placeholder}
+  """
+  @context_block_definitions [
+    %{
+      "key" => "shared_group_stats",
+      "label" => "Shared group stats",
+      "description" =>
+        "Adds total shared games and aggregate group performance for games containing every selected player."
+    },
+    %{
+      "key" => "player_accounts",
+      "label" => "Player accounts and rank",
+      "description" =>
+        "Adds each player's Riot accounts, regions, and rank context so recommendations understand account coverage."
+    },
+    %{
+      "key" => "player_game_counts",
+      "label" => "Player game counts",
+      "description" =>
+        "Adds all-game and shared-game counts for each player, useful for judging sample size."
+    },
+    %{
+      "key" => "shared_position_stats",
+      "label" => "Shared position stats",
+      "description" =>
+        "Adds per-player role performance from games this exact group played together."
+    },
+    %{
+      "key" => "recent_non_shared_position_stats",
+      "label" => "Recent non-shared position stats",
+      "description" =>
+        "Adds recent individual role performance outside the selected shared games, currently capped at 40 games per player."
+    },
+    %{
+      "key" => "overall_position_stats",
+      "label" => "Overall position stats",
+      "description" => "Adds all-time role performance within the active queue and year filters."
+    },
+    %{
+      "key" => "shared_top_champions",
+      "label" => "Shared top champions",
+      "description" =>
+        "Adds each player's top champions from games this exact group played together."
+    },
+    %{
+      "key" => "recent_non_shared_top_champions",
+      "label" => "Recent non-shared top champions",
+      "description" =>
+        "Adds each player's recent individual champion results outside the selected shared games."
+    },
+    %{
+      "key" => "overall_top_champions",
+      "label" => "Overall top champions",
+      "description" => "Adds each player's best champions across all matching games."
+    },
+    %{
+      "key" => "position_definitions",
+      "label" => "Position definitions",
+      "description" => "Adds the legal League role keys and display labels the model may use."
+    },
+    %{
+      "key" => "interpretation_notes",
+      "label" => "Interpretation notes",
+      "description" =>
+        "Adds guardrails explaining shared-game context, recent form, and small sample handling."
+    }
+  ]
 
   def suggest(player_ids, opts \\ []) do
     with {:ok, context} <- Queries.comp_suggestion_context_for_players(player_ids, opts),
@@ -15,6 +106,78 @@ defmodule Receipts.AI.CompSuggestion do
       {:ok, normalize_response(response, context)}
     end
   end
+
+  def prompt_lab_defaults(player_ids, opts \\ []) do
+    with {:ok, _context} <- Queries.comp_suggestion_context_for_players(player_ids, opts) do
+      {:ok,
+       %{
+         system_instruction: default_system_instruction(),
+         prompt_template: default_prompt_template(),
+         context_config_json: encode_context_config(default_context_config(opts)),
+         context_blocks: default_context_block_keys(),
+         temperature: @default_temperature
+       }}
+    end
+  end
+
+  def trial_prompt(attrs) do
+    system_instruction = Map.get(attrs, "system_instruction", default_system_instruction())
+    prompt_template = Map.get(attrs, "prompt_template", default_prompt_template())
+    context_json = Map.get(attrs, "context_json", "")
+    temperature = parse_temperature(Map.get(attrs, "temperature", @default_temperature))
+
+    with {:ok, context} <- decode_context(context_json),
+         {:ok, response} <-
+           ai_client().generate_structured(
+             render_prompt_template(prompt_template, context_json),
+             response_schema(),
+             ai_opts(system_instruction: system_instruction, temperature: temperature)
+           ) do
+      {:ok, normalize_response(response, context)}
+    end
+  end
+
+  def trial_prompt(player_ids, opts, attrs) do
+    system_instruction = Map.get(attrs, "system_instruction", default_system_instruction())
+    prompt_template = Map.get(attrs, "prompt_template", default_prompt_template())
+    temperature = parse_temperature(Map.get(attrs, "temperature", @default_temperature))
+    context_config = context_config_from_attrs(opts, attrs)
+
+    with {:ok, raw_context} <- Queries.comp_suggestion_context_for_players(player_ids, opts),
+         context = apply_context_config(raw_context, context_config),
+         context_json = encode_context(context),
+         {:ok, response} <-
+           ai_client().generate_structured(
+             render_prompt_template(prompt_template, context_json),
+             response_schema(),
+             ai_opts(system_instruction: system_instruction, temperature: temperature)
+           ),
+         suggestion = normalize_response(response, context),
+         {:ok, record} <-
+           store_prompt_lab_run(player_ids, opts, %{
+             system_instruction: system_instruction,
+             prompt_template: prompt_template,
+             context: context,
+             context_config: context_config,
+             temperature: temperature,
+             suggestion: suggestion
+           }) do
+      {:ok, prompt_lab_result(record)}
+    end
+  end
+
+  def prompt_lab_history(player_ids, opts \\ []) do
+    player_ids
+    |> cache_key(opts)
+    |> prompt_lab_history_records()
+    |> Enum.map(&prompt_lab_result/1)
+  end
+
+  def default_system_instruction, do: @default_system_instruction
+
+  def default_prompt_template, do: @default_prompt_template
+
+  def context_block_definitions, do: @context_block_definitions
 
   def fetch_or_generate(player_ids, opts \\ []) do
     force? = Keyword.get(opts, :force, false)
@@ -104,6 +267,31 @@ defmodule Receipts.AI.CompSuggestion do
     |> Ash.create()
   end
 
+  defp store_prompt_lab_run(player_ids, opts, attrs) do
+    CompPromptLabRun
+    |> Ash.Changeset.for_create(:create, %{
+      group_key: cache_key(player_ids, opts),
+      player_ids: normalize_player_ids(player_ids),
+      filters: cache_filters(opts),
+      system_instruction: attrs.system_instruction,
+      prompt_template: attrs.prompt_template,
+      context: attrs.context,
+      context_config: attrs.context_config,
+      temperature: attrs.temperature,
+      suggestion: attrs.suggestion,
+      generated_at: DateTime.utc_now()
+    })
+    |> Ash.create()
+  end
+
+  defp prompt_lab_history_records(group_key) do
+    CompPromptLabRun
+    |> Ash.Query.filter(group_key == ^group_key)
+    |> Ash.Query.sort(generated_at: :desc)
+    |> Ash.Query.limit(10)
+    |> Ash.read!()
+  end
+
   defp suggestion_result(record, opts) do
     cached? = Keyword.fetch!(opts, :cached?)
 
@@ -113,6 +301,19 @@ defmodule Receipts.AI.CompSuggestion do
       generated_at: record.generated_at,
       cached?: cached?,
       fresh?: fresh?(record)
+    }
+  end
+
+  defp prompt_lab_result(record) do
+    %{
+      id: record.id,
+      suggestion: clean_suggestion(record.suggestion),
+      generated_at: record.generated_at,
+      system_instruction: record.system_instruction,
+      prompt_template: record.prompt_template,
+      context: record.context,
+      context_config: record.context_config,
+      temperature: record.temperature
     }
   end
 
@@ -127,34 +328,18 @@ defmodule Receipts.AI.CompSuggestion do
     Application.get_env(:receipts, :ai_client, Receipts.AI.Gemini)
   end
 
-  defp ai_opts do
+  defp ai_opts(overrides \\ []) do
     [
-      system_instruction: """
-      You are helping a private League of Legends friend group choose roles and champions.
-      Use only the supplied JSON. Recommend one primary position per player.
-      Prefer evidence from shared games, then recent non-shared games, then overall games.
-      Be explicit about low sample sizes. Do not invent player history or champion stats.
-      All players in this friend group are men; use he/him/his pronouns for every player.
-      Write user-facing prose. Never include raw JSON path names, snake_case keys, or dotted
-      references like recent_non_shared_positions.MIDDLE in the response.
-      Each alternative must include a complete lineup with one slot for every selected player.
-      """,
-      temperature: 0.25,
+      system_instruction:
+        Keyword.get(overrides, :system_instruction, default_system_instruction()),
+      temperature: Keyword.get(overrides, :temperature, @default_temperature),
       connect_timeout: 10_000,
       receive_timeout: 90_000
     ]
   end
 
   defp prompt(context) do
-    """
-    Generate a comp suggestion for this selected group.
-
-    Return JSON matching the schema. Use player_id values exactly as provided.
-    Valid positions are TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY.
-
-    Context:
-    #{Jason.encode!(context)}
-    """
+    render_prompt_template(default_prompt_template(), Jason.encode!(context))
   end
 
   defp response_schema do
@@ -213,7 +398,7 @@ defmodule Receipts.AI.CompSuggestion do
   end
 
   defp normalize_response(response, context) do
-    selected_players = Map.new(context.selected_players, &{&1.id, &1.name})
+    selected_players = selected_players_by_id(context)
 
     %{
       "summary" => clean_prose(Map.get(response, "summary", "")),
@@ -378,6 +563,197 @@ defmodule Receipts.AI.CompSuggestion do
   end
 
   defp clean_prose(text), do: text
+
+  defp encode_context(context), do: Jason.encode!(context, pretty: true)
+
+  defp decode_context(context_json) do
+    case Jason.decode(context_json) do
+      {:ok, decoded} -> {:ok, decoded}
+      {:error, error} -> {:error, {:invalid_context_json, error}}
+    end
+  end
+
+  defp encode_context_config(context_config), do: Jason.encode!(context_config, pretty: true)
+
+  defp context_config_from_attrs(opts, attrs) do
+    cond do
+      Map.has_key?(attrs, "context_blocks") ->
+        selected_context_config(opts, Map.get(attrs, "context_blocks", []))
+
+      true ->
+        case Jason.decode(Map.get(attrs, "context_config_json", "")) do
+          {:ok, decoded} when is_map(decoded) -> decoded
+          _ -> default_context_config(opts)
+        end
+    end
+  end
+
+  defp selected_context_config(opts, selected_keys) do
+    selected_keys =
+      selected_keys
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.reject(&(&1 == ""))
+      |> MapSet.new()
+
+    %{
+      "version" => 1,
+      "mode" => "selected_comp_suggestion_context",
+      "filters" => cache_filters(opts),
+      "blocks" =>
+        Enum.map(@context_block_definitions, fn block ->
+          %{
+            "key" => block["key"],
+            "enabled" => MapSet.member?(selected_keys, block["key"]),
+            "params" => default_context_block_params(block["key"])
+          }
+        end)
+    }
+  end
+
+  defp default_context_config(opts) do
+    %{
+      "version" => 1,
+      "mode" => "default_comp_suggestion_context",
+      "filters" => cache_filters(opts),
+      "blocks" =>
+        Enum.map(@context_block_definitions, fn block ->
+          %{
+            "key" => block["key"],
+            "enabled" => true,
+            "params" => default_context_block_params(block["key"])
+          }
+        end)
+    }
+  end
+
+  defp default_context_block_keys do
+    Enum.map(@context_block_definitions, & &1["key"])
+  end
+
+  defp default_context_block_params("shared_position_stats"),
+    do: %{"top_champion_limit_per_position" => 5}
+
+  defp default_context_block_params("recent_non_shared_position_stats"),
+    do: %{"match_limit_per_player" => 40, "top_champion_limit_per_position" => 5}
+
+  defp default_context_block_params("overall_position_stats"),
+    do: %{"top_champion_limit_per_position" => 5}
+
+  defp default_context_block_params("shared_top_champions"), do: %{"limit" => 8}
+
+  defp default_context_block_params("recent_non_shared_top_champions"),
+    do: %{"match_limit_per_player" => 40, "limit" => 8}
+
+  defp default_context_block_params("overall_top_champions"), do: %{"limit" => 10}
+  defp default_context_block_params(_key), do: %{}
+
+  defp apply_context_config(context, context_config) do
+    enabled = enabled_context_blocks(context_config)
+
+    %{
+      filters: context.filters,
+      selected_players: context.selected_players,
+      players: Enum.map(context.players, &filter_player_context(&1, enabled))
+    }
+    |> maybe_put_context(:shared_games, context.shared_games, enabled, "shared_group_stats")
+    |> maybe_put_context(:positions, context.positions, enabled, "position_definitions")
+    |> maybe_put_context(:notes, context.notes, enabled, "interpretation_notes")
+  end
+
+  defp filter_player_context(player, enabled) do
+    %{id: player.id, name: player.name}
+    |> maybe_put_context(:accounts, player.accounts, enabled, "player_accounts")
+    |> maybe_put_context(:all_games, player.all_games, enabled, "player_game_counts")
+    |> maybe_put_context(:shared_games, player.shared_games, enabled, "player_game_counts")
+    |> maybe_put_context(
+      :shared_positions,
+      player.shared_positions,
+      enabled,
+      "shared_position_stats"
+    )
+    |> maybe_put_context(
+      :recent_non_shared_positions,
+      player.recent_non_shared_positions,
+      enabled,
+      "recent_non_shared_position_stats"
+    )
+    |> maybe_put_context(
+      :overall_positions,
+      player.overall_positions,
+      enabled,
+      "overall_position_stats"
+    )
+    |> maybe_put_context(
+      :shared_top_champions,
+      player.shared_top_champions,
+      enabled,
+      "shared_top_champions"
+    )
+    |> maybe_put_context(
+      :recent_non_shared_top_champions,
+      player.recent_non_shared_top_champions,
+      enabled,
+      "recent_non_shared_top_champions"
+    )
+    |> maybe_put_context(
+      :overall_top_champions,
+      player.overall_top_champions,
+      enabled,
+      "overall_top_champions"
+    )
+  end
+
+  defp maybe_put_context(context, key, value, enabled, block_key) do
+    if MapSet.member?(enabled, block_key), do: Map.put(context, key, value), else: context
+  end
+
+  defp enabled_context_blocks(%{"blocks" => blocks}) do
+    blocks
+    |> Enum.filter(&Map.get(&1, "enabled", false))
+    |> Enum.map(&Map.get(&1, "key"))
+    |> MapSet.new()
+  end
+
+  defp enabled_context_blocks(_context_config), do: MapSet.new(default_context_block_keys())
+
+  defp render_prompt_template(template, context_json) do
+    if String.contains?(template, @context_placeholder) do
+      String.replace(template, @context_placeholder, context_json)
+    else
+      template <> "\n\nContext:\n" <> context_json
+    end
+  end
+
+  defp parse_temperature(value) when is_float(value), do: clamp_temperature(value)
+  defp parse_temperature(value) when is_integer(value), do: clamp_temperature(value / 1)
+
+  defp parse_temperature(value) when is_binary(value) do
+    case Float.parse(value) do
+      {temperature, ""} -> clamp_temperature(temperature)
+      _ -> @default_temperature
+    end
+  end
+
+  defp parse_temperature(_value), do: @default_temperature
+
+  defp clamp_temperature(value) when value < 0.0, do: 0.0
+  defp clamp_temperature(value) when value > 2.0, do: 2.0
+  defp clamp_temperature(value), do: value
+
+  defp selected_players_by_id(%{selected_players: selected_players}) do
+    selected_players
+    |> Enum.map(&{to_string(&1.id), &1.name})
+    |> Map.new()
+  end
+
+  defp selected_players_by_id(%{"selected_players" => selected_players}) do
+    selected_players
+    |> Enum.map(&{to_string(Map.get(&1, "id")), Map.get(&1, "name", "")})
+    |> Map.new()
+  end
+
+  defp selected_players_by_id(_context), do: %{}
 
   defp capitalize_first(""), do: ""
 

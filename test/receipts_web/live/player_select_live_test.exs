@@ -9,6 +9,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
   alias Receipts.LoL.{
     Account,
     Champion,
+    CompPromptLabRun,
     CompSuggestionCache,
     Match,
     MatchParticipant,
@@ -214,6 +215,112 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     assert has_element?(view, "#comp-suggestion-result", "Koozie should play mid")
     assert comp_suggestion_count(player_ids) == 2
+  end
+
+  test "comp prompt lab is a separate admin route seeded from comparison filters", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+    comparison_route = ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}"
+
+    lab_route =
+      ~p"/players/compare/prompt-lab?ids=#{Enum.join(player_ids, ",")}&queues=ranked_solo&from_year=2025&to_year=2026"
+
+    {:ok, public_view, _html} = live(conn, comparison_route)
+    refute has_element?(public_view, "#toggle-comp-prompt-lab")
+    assert {:error, {:redirect, %{to: "/login"}}} = live(conn, lab_route)
+
+    admin_conn = log_in_admin(conn)
+    {:ok, comparison_view, _html} = live(admin_conn, comparison_route)
+
+    assert has_element?(
+             comparison_view,
+             "#toggle-comp-prompt-lab[href*='/players/compare/prompt-lab']"
+           )
+
+    {:ok, view, _html} = live(admin_conn, lab_route)
+    assert has_element?(view, "#comp-prompt-lab-form")
+    assert has_element?(view, "#comp-prompt-lab-header", "Queues: Ranked Solo/Duo")
+    assert has_element?(view, "#comp-prompt-lab-header", "From 2025")
+    assert has_element?(view, "#comp-prompt-lab-header", "To 2026")
+    assert has_element?(view, "#temperature-help", "Default: 0.25")
+    assert has_element?(view, "#context-block-help", "Context included in this run")
+    assert has_element?(view, "#context-block-recent_non_shared_top_champions")
+    assert has_element?(view, "#prompt_lab_context_config_json")
+
+    view
+    |> form("#comp-prompt-lab-form", %{
+      "prompt_lab" => %{
+        "system_instruction" => "Use only the supplied JSON.",
+        "prompt_template" => "Generate a comp suggestion.\n\nContext:\n{{context_json}}",
+        "context_blocks" => [
+          "shared_group_stats",
+          "player_accounts",
+          "recent_non_shared_top_champions"
+        ],
+        "temperature" => "0.15"
+      }
+    })
+    |> render_submit()
+
+    render_async(view)
+
+    assert has_element?(view, "#comp-prompt-lab-result", "Koozie should play mid")
+    assert has_element?(view, "#comp-prompt-lab-history", "Koozie should play mid")
+    assert comp_suggestion_count(player_ids) == 0
+
+    assert comp_prompt_lab_run_count(player_ids,
+             queue_types: ["ranked_solo"],
+             from_year: 2025,
+             to_year: 2026
+           ) == 1
+
+    assert [run] =
+             comp_prompt_lab_runs(player_ids,
+               queue_types: ["ranked_solo"],
+               from_year: 2025,
+               to_year: 2026
+             )
+
+    assert run.context_config["mode"] == "selected_comp_suggestion_context"
+
+    assert Enum.any?(
+             run.context_config["blocks"],
+             &(&1["key"] == "recent_non_shared_top_champions" && &1["enabled"])
+           )
+
+    assert Enum.any?(
+             run.context_config["blocks"],
+             &(&1["key"] == "overall_top_champions" && !&1["enabled"])
+           )
+  end
+
+  test "comp prompt lab can run with all optional context blocks disabled", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_ids = [player_a.id, player_b.id]
+
+    admin_conn = log_in_admin(conn)
+
+    {:ok, view, _html} =
+      live(admin_conn, ~p"/players/compare/prompt-lab?ids=#{Enum.join(player_ids, ",")}")
+
+    view
+    |> form("#comp-prompt-lab-form", %{
+      "prompt_lab" => %{
+        "system_instruction" => "Use only the supplied JSON.",
+        "prompt_template" => "Generate a comp suggestion.\n\nContext:\n{{context_json}}",
+        "context_blocks" => [""],
+        "temperature" => "0.25"
+      }
+    })
+    |> render_submit()
+
+    render_async(view)
+
+    assert has_element?(view, "#comp-prompt-lab-result", "Koozie should play mid")
+    assert comp_suggestion_count(player_ids) == 0
+    assert comp_prompt_lab_run_count(player_ids) == 1
   end
 
   test "win loss analysis button is admin only", %{conn: conn} do
@@ -489,6 +596,20 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     |> Ash.Query.filter(cache_key == ^cache_key)
     |> Ash.read!()
     |> length()
+  end
+
+  defp comp_prompt_lab_run_count(player_ids, opts \\ []) do
+    player_ids
+    |> comp_prompt_lab_runs(opts)
+    |> length()
+  end
+
+  defp comp_prompt_lab_runs(player_ids, opts) do
+    group_key = CompSuggestionService.cache_key(player_ids, opts)
+
+    CompPromptLabRun
+    |> Ash.Query.filter(group_key == ^group_key)
+    |> Ash.read!()
   end
 
   defp create_win_loss_analysis(player_ids, generated_at, summary) do
