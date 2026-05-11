@@ -3,6 +3,6 @@ defmodule ReceiptsWeb.PageControllerTest do
 
   test "GET / renders player select page", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Select a Player"
+    assert html_response(conn, 200) =~ "Select Players"
   end
 end

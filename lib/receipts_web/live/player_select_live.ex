@@ -12,7 +12,32 @@ defmodule ReceiptsWeb.PlayerSelectLive do
     {:ok,
      socket
      |> assign(:players, players)
-     |> assign(:home_stats, home_stats)}
+     |> assign(:home_stats, home_stats)
+     |> assign(:selected_player_ids, MapSet.new())}
+  end
+
+  @impl true
+  def handle_event("select_players", params, socket) do
+    selected_ids = MapSet.new(Map.get(params, "player_ids", []))
+    {:noreply, assign(socket, :selected_player_ids, selected_ids)}
+  end
+
+  @impl true
+  def handle_event("view_receipts", params, socket) do
+    selected_player_ids =
+      params
+      |> Map.get("player_ids", MapSet.to_list(socket.assigns.selected_player_ids))
+      |> MapSet.new()
+
+    selected_ids = selected_player_ids(socket.assigns.players, selected_player_ids)
+
+    case selected_ids do
+      [] ->
+        {:noreply, put_flash(socket, :error, "Select at least one player.")}
+
+      ids ->
+        {:noreply, push_navigate(socket, to: ~p"/players?ids=#{Enum.join(ids, ",")}")}
+    end
   end
 
   defp champion_icon_url(champion) do
@@ -26,6 +51,12 @@ defmodule ReceiptsWeb.PlayerSelectLive do
   defp win_rate_color(rate) when rate >= 55.0, do: "text-emerald-400"
   defp win_rate_color(rate) when rate < 45.0, do: "text-red-400"
   defp win_rate_color(_), do: "text-base-content/70"
+
+  defp selected_player_ids(players, selected_player_ids) do
+    players
+    |> Enum.map(& &1.id)
+    |> Enum.filter(&MapSet.member?(selected_player_ids, &1))
+  end
 
   defp tier_classes("IRON"), do: {"text-slate-400", "bg-slate-700/50 border-slate-600/40"}
   defp tier_classes("BRONZE"), do: {"text-amber-600", "bg-amber-950/60 border-amber-700/40"}
@@ -67,9 +98,9 @@ defmodule ReceiptsWeb.PlayerSelectLive do
       <div class="space-y-8">
         <div class="text-center space-y-2 pt-4">
           <p class="text-xs font-semibold uppercase tracking-widest text-primary">Who's up?</p>
-          <h1 class="text-4xl font-bold tracking-tight">Select a Player</h1>
+          <h1 class="text-4xl font-bold tracking-tight">Select Players</h1>
           <p class="text-sm text-base-content/55 max-w-lg mx-auto leading-6">
-            Pull up the receipts — see what they've actually been playing and how it's going.
+            Pick one player for individual receipts, or select multiple players to compare shared games.
           </p>
         </div>
 
@@ -85,15 +116,56 @@ defmodule ReceiptsWeb.PlayerSelectLive do
             </.link>
           </div>
         <% else %>
-          <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            <%= for player <- @players do %>
-              <% stats = Map.get(@home_stats, player.id, %{}) %>
-              <% top_champ = Map.get(stats, :top_champion) %>
-              <% total_games = Map.get(stats, :total_games, 0) %>
-              <% overall_win_rate = Map.get(stats, :overall_win_rate, 0.0) %>
-              <% best_rank = Map.get(stats, :best_rank) %>
-              <.link navigate={~p"/players/#{player.id}"} id={"player-tile-#{player.id}"}>
-                <div class="group relative overflow-hidden rounded-2xl border border-base-300/60 bg-base-200 shadow-md transition-all duration-200 hover:border-primary/40 hover:shadow-xl hover:-translate-y-1 cursor-pointer flex flex-col">
+          <.form
+            for={to_form(%{}, as: :players)}
+            id="player-selection-form"
+            phx-change="select_players"
+            phx-submit="view_receipts"
+            class="space-y-5"
+          >
+            <div class="sticky top-3 z-20 flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-200/95 px-4 py-3 shadow-lg backdrop-blur">
+              <div>
+                <p class="text-sm font-bold">
+                  {MapSet.size(@selected_player_ids)} selected
+                </p>
+                <p class="text-xs text-base-content/45">
+                  Shared receipts only include games containing every selected player.
+                </p>
+              </div>
+              <button
+                id="view-receipts-button"
+                type="submit"
+                disabled={MapSet.size(@selected_player_ids) == 0}
+                class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                View Receipts
+                <.icon name="hero-arrow-right" class="h-4 w-4" />
+              </button>
+            </div>
+
+            <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              <%= for player <- @players do %>
+                <% stats = Map.get(@home_stats, player.id, %{}) %>
+                <% top_champ = Map.get(stats, :top_champion) %>
+                <% total_games = Map.get(stats, :total_games, 0) %>
+                <% overall_win_rate = Map.get(stats, :overall_win_rate, 0.0) %>
+                <% best_rank = Map.get(stats, :best_rank) %>
+                <% selected? = MapSet.member?(@selected_player_ids, player.id) %>
+                <label id={"player-tile-#{player.id}"} class="block">
+                  <input
+                    type="checkbox"
+                    name="player_ids[]"
+                    value={player.id}
+                    checked={selected?}
+                    class="peer sr-only"
+                  />
+                  <div class={[
+                    "group relative overflow-hidden rounded-2xl border bg-base-200 shadow-md transition-all duration-200 hover:border-primary/40 hover:shadow-xl hover:-translate-y-1 cursor-pointer flex flex-col",
+                    if(selected?,
+                      do: "border-primary/70 ring-2 ring-primary/30",
+                      else: "border-base-300/60"
+                    )
+                  ]}>
                   <%!-- Hero: blurred splash bg + icon + player name + rank --%>
                   <div class="relative overflow-hidden bg-base-300 shrink-0">
                     <%= if top_champ do %>
@@ -107,6 +179,15 @@ defmodule ReceiptsWeb.PlayerSelectLive do
                     <div class="absolute inset-0 bg-black/55" />
 
                     <div class="relative p-5">
+                      <div class={[
+                        "absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border transition",
+                        if(selected?,
+                          do: "border-primary bg-primary text-primary-content",
+                          else: "border-white/20 bg-black/30 text-white/25"
+                        )
+                      ]}>
+                        <.icon name="hero-check" class="h-4 w-4" />
+                      </div>
                       <div class="flex items-start justify-between gap-4">
                         <%!-- Left: all text info --%>
                         <div class="min-w-0 flex-1">
@@ -184,10 +265,11 @@ defmodule ReceiptsWeb.PlayerSelectLive do
                       </p>
                     </div>
                   </div>
-                </div>
-              </.link>
-            <% end %>
-          </div>
+                  </div>
+                </label>
+              <% end %>
+            </div>
+          </.form>
         <% end %>
       </div>
     </Layouts.app>

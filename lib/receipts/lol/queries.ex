@@ -1,9 +1,12 @@
 defmodule Receipts.LoL.Queries do
   @moduledoc false
 
+  import Ecto.Query
+
   require Ash.Query
 
   alias Receipts.LoL.{Account, Champion, MatchParticipant, Queue}
+  alias Receipts.Repo
 
   @doc """
   Returns `{:ok, stats}` or `{:error, :champion_not_found}`.
@@ -22,6 +25,114 @@ defmodule Receipts.LoL.Queries do
       nil -> {:error, :champion_not_found}
       champion -> {:ok, aggregate_stats(player_id, champion, opts)}
     end
+  end
+
+  def receipts_for_players(player_ids, champion_name, opts \\ [])
+      when is_list(player_ids) and is_binary(champion_name) do
+    player_ids = normalize_ids(player_ids)
+
+    case find_champion(champion_name) do
+      nil ->
+        {:error, :champion_not_found}
+
+      champion ->
+        match_ids =
+          Keyword.get_lazy(opts, :match_ids, fn -> comparison_match_ids(player_ids, opts) end)
+
+        opts = Keyword.put(opts, :match_ids, match_ids)
+
+        results =
+          Enum.map(player_ids, fn player_id ->
+            %{player_id: player_id, result: aggregate_stats(player_id, champion, opts)}
+          end)
+
+        {:ok, results}
+    end
+  end
+
+  def common_match_ids_for_players(player_ids, opts \\ []) do
+    player_ids = normalize_ids(player_ids)
+
+    if length(player_ids) <= 1 do
+      nil
+    else
+      queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+      from_year = Keyword.get(opts, :from_year)
+      to_year = Keyword.get(opts, :to_year)
+
+      MatchParticipant
+      |> join(:inner, [participant], account in Account, on: account.id == participant.account_id)
+      |> where([participant, account], account.player_id in ^player_ids)
+      |> where([participant], participant.queue_type in ^queue_types)
+      |> apply_ecto_year_filters(from_year, to_year)
+      |> group_by([participant], participant.match_id)
+      |> having(
+        [_participant, account],
+        count(account.player_id, :distinct) == ^length(player_ids)
+      )
+      |> select([participant], participant.match_id)
+      |> Repo.all()
+    end
+  end
+
+  def group_stats_for_players(player_ids, opts \\ []) do
+    player_ids = normalize_ids(player_ids)
+
+    match_ids =
+      Keyword.get_lazy(opts, :match_ids, fn -> comparison_match_ids(player_ids, opts) end)
+
+    queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+    from_year = Keyword.get(opts, :from_year)
+    to_year = Keyword.get(opts, :to_year)
+
+    account_player_ids =
+      Account
+      |> Ash.Query.filter(player_id in ^player_ids)
+      |> Ash.read!()
+      |> Map.new(&{&1.id, &1.player_id})
+
+    participants =
+      cond do
+        player_ids == [] ->
+          []
+
+        match_ids in [nil, []] ->
+          []
+
+        true ->
+          MatchParticipant
+          |> Ash.Query.filter(account_id in ^Map.keys(account_player_ids))
+          |> Ash.Query.filter(match_id in ^match_ids)
+          |> Ash.Query.filter(queue_type in ^queue_types)
+          |> apply_year_filters(from_year, to_year)
+          |> Ash.read!()
+      end
+
+    matches =
+      participants
+      |> Enum.group_by(& &1.match_id)
+      |> Enum.filter(fn {_match_id, parts} ->
+        parts
+        |> Enum.map(&Map.get(account_player_ids, &1.account_id))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+        |> length() == length(player_ids)
+      end)
+
+    games_played = length(matches)
+
+    wins =
+      Enum.count(matches, fn {_match_id, parts} ->
+        Enum.all?(player_ids, fn player_id ->
+          Enum.any?(parts, &(Map.get(account_player_ids, &1.account_id) == player_id && &1.win))
+        end)
+      end)
+
+    %{
+      games_played: games_played,
+      wins: wins,
+      win_rate: if(games_played > 0, do: Float.round(wins / games_played * 100, 1), else: 0.0)
+    }
   end
 
   def player_home_stats(players) do
@@ -160,18 +271,25 @@ defmodule Receipts.LoL.Queries do
     queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
     from_year = Keyword.get(opts, :from_year)
     to_year = Keyword.get(opts, :to_year)
+    match_ids = Keyword.get(opts, :match_ids)
 
     account_ids = account_ids_for_player(player_id)
 
     participants =
-      if account_ids == [] do
-        []
-      else
-        MatchParticipant
-        |> Ash.Query.filter(account_id in ^account_ids)
-        |> Ash.Query.filter(queue_type in ^queue_types)
-        |> apply_year_filters(from_year, to_year)
-        |> Ash.read!()
+      cond do
+        account_ids == [] ->
+          []
+
+        match_ids == [] ->
+          []
+
+        true ->
+          MatchParticipant
+          |> Ash.Query.filter(account_id in ^account_ids)
+          |> Ash.Query.filter(queue_type in ^queue_types)
+          |> apply_match_filter(match_ids)
+          |> apply_year_filters(from_year, to_year)
+          |> Ash.read!()
       end
 
     participants
@@ -191,20 +309,112 @@ defmodule Receipts.LoL.Queries do
     from_year = Keyword.get(opts, :from_year)
     to_year = Keyword.get(opts, :to_year)
     positions = Keyword.get(opts, :positions, [])
+    match_ids = Keyword.get(opts, :match_ids)
 
     account_ids = account_ids_for_player(player_id)
 
     participants =
-      if account_ids == [] do
-        []
-      else
-        MatchParticipant
-        |> Ash.Query.filter(account_id in ^account_ids)
-        |> Ash.Query.filter(queue_type in ^queue_types)
-        |> apply_year_filters(from_year, to_year)
-        |> apply_position_filter(positions)
-        |> Ash.Query.load(:champion)
-        |> Ash.read!()
+      cond do
+        account_ids == [] ->
+          []
+
+        match_ids == [] ->
+          []
+
+        true ->
+          MatchParticipant
+          |> Ash.Query.filter(account_id in ^account_ids)
+          |> Ash.Query.filter(queue_type in ^queue_types)
+          |> apply_match_filter(match_ids)
+          |> apply_year_filters(from_year, to_year)
+          |> apply_position_filter(positions)
+          |> Ash.Query.load(:champion)
+          |> Ash.read!()
+      end
+
+    summarize_champion_participants(participants)
+  end
+
+  def top_champions_by_player(player_ids, opts \\ []) do
+    player_ids = normalize_ids(player_ids)
+
+    Map.new(player_ids, fn player_id ->
+      {player_id, top_champions_for_player(player_id, opts)}
+    end)
+  end
+
+  defp summarize_champion_participants(participants) do
+    avg = fn parts, field ->
+      n = length(parts)
+
+      if n > 0,
+        do: Float.round(Enum.sum(Enum.map(parts, &(Map.get(&1, field) || 0))) / n, 1),
+        else: 0.0
+    end
+
+    participants
+    |> Enum.group_by(& &1.champion_id)
+    |> Enum.map(fn {_champion_id, parts} ->
+      champion = hd(parts).champion
+      games_played = length(parts)
+      wins = Enum.count(parts, & &1.win)
+      win_rate = if games_played > 0, do: Float.round(wins / games_played * 100, 1), else: 0.0
+      avg_kills = avg.(parts, :kills)
+      avg_deaths = avg.(parts, :deaths)
+      avg_assists = avg.(parts, :assists)
+
+      kda_ratio =
+        if avg_deaths > 0,
+          do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
+          else: Float.round(avg_kills + avg_assists, 2)
+
+      %{
+        champion: champion,
+        games_played: games_played,
+        wins: wins,
+        win_rate: win_rate,
+        avg_kills: avg_kills,
+        avg_deaths: avg_deaths,
+        avg_assists: avg_assists,
+        kda_ratio: kda_ratio
+      }
+    end)
+    |> Enum.sort_by(fn %{games_played: g, champion: c} -> {-g, c.name} end)
+  end
+
+  def top_champions_for_players(player_ids, opts \\ []) do
+    player_ids = normalize_ids(player_ids)
+    queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+    from_year = Keyword.get(opts, :from_year)
+    to_year = Keyword.get(opts, :to_year)
+    positions = Keyword.get(opts, :positions, [])
+
+    match_ids =
+      Keyword.get_lazy(opts, :match_ids, fn -> comparison_match_ids(player_ids, opts) end)
+
+    account_ids =
+      Account
+      |> Ash.Query.filter(player_id in ^player_ids)
+      |> Ash.read!()
+      |> Enum.map(& &1.id)
+
+    participants =
+      cond do
+        account_ids == [] ->
+          []
+
+        match_ids == [] ->
+          []
+
+        true ->
+          MatchParticipant
+          |> Ash.Query.filter(account_id in ^account_ids)
+          |> Ash.Query.filter(queue_type in ^queue_types)
+          |> apply_match_filter(match_ids)
+          |> apply_year_filters(from_year, to_year)
+          |> apply_position_filter(positions)
+          |> Ash.Query.load(:champion)
+          |> Ash.read!()
       end
 
     avg = fn parts, field ->
@@ -265,20 +475,27 @@ defmodule Receipts.LoL.Queries do
     from_year = Keyword.get(opts, :from_year, nil)
     to_year = Keyword.get(opts, :to_year, nil)
     positions = Keyword.get(opts, :positions, [])
+    match_ids = Keyword.get(opts, :match_ids)
 
     account_ids = account_ids_for_player(player_id)
 
     # Load all participants for aggregate stats — no match JOIN needed.
     all_participants =
-      if account_ids == [] do
-        []
-      else
-        MatchParticipant
-        |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
-        |> Ash.Query.filter(queue_type in ^queue_types)
-        |> apply_year_filters(from_year, to_year)
-        |> apply_position_filter(positions)
-        |> Ash.read!()
+      cond do
+        account_ids == [] ->
+          []
+
+        match_ids == [] ->
+          []
+
+        true ->
+          MatchParticipant
+          |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
+          |> Ash.Query.filter(queue_type in ^queue_types)
+          |> apply_match_filter(match_ids)
+          |> apply_year_filters(from_year, to_year)
+          |> apply_position_filter(positions)
+          |> Ash.read!()
       end
 
     games_played = length(all_participants)
@@ -318,18 +535,24 @@ defmodule Receipts.LoL.Queries do
 
     # Separate query for recent games: sorted in SQL, only 20 rows, match loaded.
     recent_games =
-      if account_ids == [] do
-        []
-      else
-        MatchParticipant
-        |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
-        |> Ash.Query.filter(queue_type in ^queue_types)
-        |> apply_year_filters(from_year, to_year)
-        |> apply_position_filter(positions)
-        |> Ash.Query.sort(game_datetime: :desc)
-        |> Ash.Query.limit(20)
-        |> Ash.Query.load(:match)
-        |> Ash.read!()
+      cond do
+        account_ids == [] ->
+          []
+
+        match_ids == [] ->
+          []
+
+        true ->
+          MatchParticipant
+          |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
+          |> Ash.Query.filter(queue_type in ^queue_types)
+          |> apply_match_filter(match_ids)
+          |> apply_year_filters(from_year, to_year)
+          |> apply_position_filter(positions)
+          |> Ash.Query.sort(game_datetime: :desc)
+          |> Ash.Query.limit(20)
+          |> Ash.Query.load(:match)
+          |> Ash.read!()
       end
 
     %{
@@ -353,6 +576,12 @@ defmodule Receipts.LoL.Queries do
     Ash.Query.filter(query, position in ^positions)
   end
 
+  defp apply_match_filter(query, nil), do: query
+
+  defp apply_match_filter(query, match_ids) do
+    Ash.Query.filter(query, match_id in ^match_ids)
+  end
+
   defp apply_year_filters(query, from_year, to_year) do
     query
     |> then(fn q ->
@@ -371,5 +600,37 @@ defmodule Receipts.LoL.Queries do
         q
       end
     end)
+  end
+
+  defp apply_ecto_year_filters(query, from_year, to_year) do
+    query
+    |> then(fn q ->
+      if from_year do
+        from_dt = DateTime.new!(Date.new!(from_year, 1, 1), ~T[00:00:00], "Etc/UTC")
+        where(q, [participant], participant.game_datetime >= ^from_dt)
+      else
+        q
+      end
+    end)
+    |> then(fn q ->
+      if to_year do
+        to_dt = DateTime.new!(Date.new!(to_year + 1, 1, 1), ~T[00:00:00], "Etc/UTC")
+        where(q, [participant], participant.game_datetime < ^to_dt)
+      else
+        q
+      end
+    end)
+  end
+
+  defp comparison_match_ids([_player_id], _opts), do: nil
+  defp comparison_match_ids([], _opts), do: []
+  defp comparison_match_ids(player_ids, opts), do: common_match_ids_for_players(player_ids, opts)
+
+  defp normalize_ids(ids) do
+    ids
+    |> List.wrap()
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
   end
 end

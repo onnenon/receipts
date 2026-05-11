@@ -25,6 +25,7 @@ defmodule ReceiptsWeb.Router do
 
     live_session :default, on_mount: {ReceiptsWeb.AdminAuth, :assign_admin_authenticated} do
       live("/", PlayerSelectLive, :index)
+      live("/players", PlayerLive, :show)
       live("/players/:id", PlayerLive, :show)
       live("/receipts", ReceiptsLive, :index)
     end

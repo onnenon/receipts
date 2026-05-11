@@ -10,43 +10,82 @@ defmodule ReceiptsWeb.PlayerLive do
   @earliest_year 2013
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
-    player =
-      Player
-      |> Ash.Query.filter(id == ^id)
-      |> Ash.Query.load([:accounts, :oldest_game_date, :newest_game_date])
-      |> Ash.read!()
-      |> List.first()
+  def mount(params, _session, socket) do
+    player_ids = player_ids_from_params(params)
+    players = load_players(player_ids)
 
-    case player do
-      nil ->
+    case players do
+      [] ->
         {:ok, push_navigate(socket, to: ~p"/")}
 
-      player ->
+      [player | _] ->
+        player_ids = Enum.map(players, & &1.id)
         all_champions = Ash.read!(Champion) |> Enum.sort_by(& &1.name)
         enabled_queues = MapSet.new(Queue.default_queues())
+        comparison? = length(players) > 1
+        queue_types = MapSet.to_list(enabled_queues)
 
-        top_champions =
-          Queries.top_champions_for_player(player.id,
-            queue_types: MapSet.to_list(enabled_queues)
+        shared_match_ids =
+          if comparison?,
+            do: Queries.common_match_ids_for_players(player_ids, queue_types: queue_types),
+            else: nil
+
+        top_champions_by_player =
+          Queries.top_champions_by_player(player_ids,
+            queue_types: queue_types,
+            match_ids: shared_match_ids
           )
+
+        top_champions = Map.get(top_champions_by_player, player.id, [])
+
+        group_stats =
+          if comparison?,
+            do:
+              Queries.group_stats_for_players(player_ids,
+                queue_types: queue_types,
+                match_ids: shared_match_ids
+              ),
+            else: nil
+
+        position_stats_by_player =
+          if comparison? do
+            Map.new(players, fn selected_player ->
+              {selected_player.id,
+               Queries.position_breakdown_for_player(selected_player.id,
+                 queue_types: queue_types,
+                 match_ids: shared_match_ids
+               )}
+            end)
+          else
+            %{}
+          end
 
         player_position_stats =
-          Queries.position_breakdown_for_player(player.id,
-            queue_types: MapSet.to_list(enabled_queues)
-          )
+          if comparison? do
+            []
+          else
+            Queries.position_breakdown_for_player(player.id, queue_types: queue_types)
+          end
 
         {:ok,
          socket
          |> assign(:player, player)
+         |> assign(:players, players)
+         |> assign(:player_ids, player_ids)
+         |> assign(:comparison?, comparison?)
+         |> assign(:shared_match_ids, shared_match_ids)
+         |> assign(:group_stats, group_stats)
          |> assign(:all_champions, all_champions)
          |> assign(:top_champions, top_champions)
+         |> assign(:top_champions_by_player, top_champions_by_player)
+         |> assign(:position_stats_by_player, position_stats_by_player)
          |> assign(:player_position_stats, player_position_stats)
          |> assign(:enabled_queues, enabled_queues)
          |> assign(:enabled_positions, MapSet.new())
          |> assign(:from_year, nil)
          |> assign(:to_year, nil)
          |> assign(:selected_champion, nil)
+         |> assign(:selected_champions, %{})
          |> assign(:champion_filter, "")
          |> assign(:champion_sort, :games)
          |> assign(:champion_limit, 20)
@@ -54,35 +93,67 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:filters_open, true)
          |> assign(:champions_open, true)
          |> assign(:result, nil)
+         |> assign(:results, [])
+         |> assign(:player_results, %{})
          |> assign(:recent_queue_filter, nil)}
     end
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    case params["champion"] do
-      nil ->
-        {:noreply, socket |> assign(:selected_champion, nil) |> assign(:result, nil)}
+    if socket.assigns.comparison? do
+      {:noreply, socket}
+    else
+      case params["champion"] do
+        nil ->
+          {:noreply,
+           socket
+           |> assign(:selected_champion, nil)
+           |> assign(:result, nil)
+           |> assign(:results, [])}
 
-      champion_key ->
-        case find_champion(socket.assigns.all_champions, champion_key) do
-          nil ->
-            {:noreply, socket}
+        champion_key ->
+          case find_champion(socket.assigns.all_champions, champion_key) do
+            nil ->
+              {:noreply, socket}
 
-          champion ->
-            socket =
-              socket
-              |> assign(:selected_champion, champion)
+            champion ->
+              socket =
+                socket
+                |> assign(:selected_champion, champion)
 
-            {:noreply, run_query(socket)}
-        end
+              {:noreply, run_query(socket)}
+          end
+      end
     end
   end
 
   @impl true
   def handle_event("select_champion", %{"key" => champion_key}, socket) do
-    {:noreply,
-     push_patch(socket, to: ~p"/players/#{socket.assigns.player.id}?champion=#{champion_key}")}
+    {:noreply, push_patch(socket, to: player_path(socket.assigns, champion_key))}
+  end
+
+  @impl true
+  def handle_event(
+        "select_player_champion",
+        %{"player-id" => player_id, "key" => champion_key},
+        socket
+      ) do
+    case find_champion(socket.assigns.all_champions, champion_key) do
+      nil ->
+        {:noreply, socket}
+
+      champion ->
+        socket =
+          socket
+          |> assign(
+            :selected_champions,
+            Map.put(socket.assigns.selected_champions, player_id, champion)
+          )
+          |> run_player_query(player_id, champion)
+
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -182,44 +253,105 @@ defmodule ReceiptsWeb.PlayerLive do
 
   defp maybe_rerun(socket) do
     socket = refresh_top_champions(socket)
-    if socket.assigns.selected_champion, do: run_query(socket), else: socket
+
+    cond do
+      socket.assigns.comparison? ->
+        run_comparison_queries(socket)
+
+      socket.assigns.selected_champion ->
+        run_query(socket)
+
+      true ->
+        socket
+    end
   end
 
   defp refresh_top_champions(socket) do
     %{
       player: player,
+      player_ids: player_ids,
+      comparison?: comparison?,
       enabled_queues: eq,
       enabled_positions: ep,
       from_year: from_year,
       to_year: to_year
     } = socket.assigns
 
-    positions = MapSet.to_list(ep)
+    positions = if comparison?, do: [], else: MapSet.to_list(ep)
     queue_types = MapSet.to_list(eq)
 
-    top_champions =
-      Queries.top_champions_for_player(player.id,
+    shared_match_ids =
+      if comparison? do
+        Queries.common_match_ids_for_players(player_ids,
+          queue_types: queue_types,
+          from_year: from_year,
+          to_year: to_year
+        )
+      end
+
+    top_champions_by_player =
+      Queries.top_champions_by_player(player_ids,
         queue_types: queue_types,
         positions: positions,
         from_year: from_year,
-        to_year: to_year
+        to_year: to_year,
+        match_ids: shared_match_ids
       )
+
+    top_champions = Map.get(top_champions_by_player, player.id, [])
+
+    group_stats =
+      if comparison? do
+        Queries.group_stats_for_players(player_ids,
+          queue_types: queue_types,
+          from_year: from_year,
+          to_year: to_year,
+          match_ids: shared_match_ids
+        )
+      end
+
+    position_stats_by_player =
+      if comparison? do
+        Map.new(socket.assigns.players, fn selected_player ->
+          {selected_player.id,
+           Queries.position_breakdown_for_player(selected_player.id,
+             queue_types: queue_types,
+             from_year: from_year,
+             to_year: to_year,
+             match_ids: shared_match_ids
+           )}
+        end)
+      else
+        %{}
+      end
 
     player_position_stats =
-      Queries.position_breakdown_for_player(player.id,
-        queue_types: queue_types,
-        from_year: from_year,
-        to_year: to_year
-      )
+      if comparison? do
+        []
+      else
+        Queries.position_breakdown_for_player(player.id,
+          queue_types: queue_types,
+          from_year: from_year,
+          to_year: to_year
+        )
+      end
 
     socket
+    |> assign(:shared_match_ids, shared_match_ids)
+    |> assign(:group_stats, group_stats)
     |> assign(:top_champions, top_champions)
+    |> assign(:top_champions_by_player, top_champions_by_player)
+    |> assign(:position_stats_by_player, position_stats_by_player)
     |> assign(:player_position_stats, player_position_stats)
   end
 
   defp run_query(socket) do
     %{
       player: player,
+      players: players,
+      player_ids: player_ids,
+      comparison?: comparison?,
+      shared_match_ids: shared_match_ids,
       selected_champion: champion,
       enabled_queues: eq,
       enabled_positions: ep,
@@ -231,17 +363,100 @@ defmodule ReceiptsWeb.PlayerLive do
       queue_types: MapSet.to_list(eq),
       positions: MapSet.to_list(ep),
       from_year: from_year,
-      to_year: to_year
+      to_year: to_year,
+      match_ids: shared_match_ids
     ]
 
-    case Queries.receipts(player.id, champion.key, opts) do
+    query =
+      if comparison?,
+        do: Queries.receipts_for_players(player_ids, champion.key, opts),
+        else: Queries.receipts(player.id, champion.key, opts)
+
+    case query do
+      {:ok, results} when is_list(results) ->
+        results =
+          Enum.map(results, fn %{player_id: player_id, result: result} ->
+            %{player: Enum.find(players, &(&1.id == player_id)), result: result}
+          end)
+          |> Enum.reject(&is_nil(&1.player))
+
+        socket
+        |> assign(:results, results)
+        |> assign(:result, results |> List.first() |> then(&(&1 && &1.result)))
+
       {:ok, result} ->
-        assign(socket, :result, result)
+        socket
+        |> assign(:result, result)
+        |> assign(:results, [%{player: player, result: result}])
 
       {:error, :champion_not_found} ->
-        socket |> assign(:result, nil) |> put_flash(:error, "Champion not found.")
+        socket
+        |> assign(:result, nil)
+        |> assign(:results, [])
+        |> put_flash(:error, "Champion not found.")
     end
   end
+
+  defp run_comparison_queries(socket) do
+    Enum.reduce(socket.assigns.selected_champions, socket, fn {player_id, champion}, socket ->
+      run_player_query(socket, player_id, champion)
+    end)
+  end
+
+  defp run_player_query(socket, player_id, champion) do
+    %{
+      shared_match_ids: shared_match_ids,
+      enabled_queues: eq,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    opts = [
+      queue_types: MapSet.to_list(eq),
+      positions: [],
+      from_year: from_year,
+      to_year: to_year,
+      match_ids: shared_match_ids
+    ]
+
+    case Queries.receipts(player_id, champion.key, opts) do
+      {:ok, result} ->
+        assign(socket, :player_results, Map.put(socket.assigns.player_results, player_id, result))
+
+      {:error, :champion_not_found} ->
+        socket
+    end
+  end
+
+  defp player_ids_from_params(%{"ids" => ids}) when is_binary(ids) do
+    ids
+    |> String.split(",", trim: true)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp player_ids_from_params(%{"id" => id}), do: [id]
+  defp player_ids_from_params(_params), do: []
+
+  defp load_players(player_ids) do
+    players =
+      Player
+      |> Ash.Query.filter(id in ^player_ids)
+      |> Ash.Query.load([:accounts, :oldest_game_date, :newest_game_date])
+      |> Ash.read!()
+      |> Map.new(&{&1.id, &1})
+
+    player_ids
+    |> Enum.map(&Map.get(players, &1))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp player_path(%{comparison?: true, player_ids: player_ids}, champion_key) do
+    ~p"/players?ids=#{Enum.join(player_ids, ",")}&champion=#{champion_key}"
+  end
+
+  defp player_path(%{player: player}, champion_key),
+    do: ~p"/players/#{player.id}?champion=#{champion_key}"
 
   @tier_order ~w(IRON BRONZE SILVER GOLD PLATINUM EMERALD DIAMOND MASTER GRANDMASTER CHALLENGER)
   @division_order ~w(IV III II I)
@@ -495,6 +710,22 @@ defmodule ReceiptsWeb.PlayerLive do
       |> assign(:total_games, total_games(assigns.top_champions))
       |> assign(:overall_wr, overall_win_rate(assigns.top_champions))
       |> assign(
+        :displayed_champions_by_player,
+        Map.new(assigns.players, fn player ->
+          champions =
+            assigns.top_champions_by_player
+            |> Map.get(player.id, [])
+            |> filter_champions_by_name(assigns.champion_filter)
+            |> apply_sort_and_limit(
+              assigns.champion_sort,
+              assigns.champion_limit,
+              assigns.min_games
+            )
+
+          {player.id, champions}
+        end)
+      )
+      |> assign(
         :displayed_champions,
         assigns.top_champions
         |> filter_champions_by_name(assigns.champion_filter)
@@ -525,10 +756,14 @@ defmodule ReceiptsWeb.PlayerLive do
             </.link>
             <%!-- Player info --%>
             <div class="min-w-0 flex-1">
-              <p class="text-xs font-semibold uppercase tracking-widest text-primary">Receipts</p>
+              <p class="text-xs font-semibold uppercase tracking-widest text-primary">
+                {if @comparison?, do: "Shared Receipts", else: "Receipts"}
+              </p>
               <div class="mt-0.5 flex flex-wrap items-center gap-3">
-                <h1 class="text-3xl font-bold tracking-tight">{@player.name}</h1>
-                <%= if best do %>
+                <h1 class="text-3xl font-bold tracking-tight">
+                  {Enum.map_join(@players, " + ", & &1.name)}
+                </h1>
+                <%= if best && !@comparison? do %>
                   <div class={[
                     "flex items-center gap-2 rounded-xl border px-3 py-1.5",
                     rank_tier_badge(best)
@@ -545,7 +780,18 @@ defmodule ReceiptsWeb.PlayerLive do
                 <% end %>
               </div>
               <div class="mt-3 flex flex-wrap items-center gap-2">
-                <%= if @total_games > 0 do %>
+                <%= if @comparison? do %>
+                  <span class="inline-flex items-center rounded-lg border border-base-300 bg-base-300/40 px-2.5 py-1 text-xs font-medium text-base-content/60">
+                    {@group_stats.games_played} shared games
+                  </span>
+                  <span class={[
+                    "inline-flex items-center rounded-lg border px-2.5 py-1 text-xs font-bold",
+                    win_rate_bg(@group_stats.win_rate)
+                  ]}>
+                    {@group_stats.win_rate}% group WR
+                  </span>
+                <% end %>
+                <%= if @total_games > 0 && !@comparison? do %>
                   <span class="inline-flex items-center rounded-lg border border-base-300 bg-base-300/40 px-2.5 py-1 text-xs font-medium text-base-content/60">
                     {@total_games} games tracked
                   </span>
@@ -561,16 +807,21 @@ defmodule ReceiptsWeb.PlayerLive do
                     </span>
                   <% end %>
                 <% end %>
-                <%= for account <- @player.accounts do %>
-                  <a
-                    href={opgg_url(account)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="inline-flex items-center gap-1 rounded-lg border border-base-300 bg-base-200 px-2.5 py-1 text-xs font-medium text-base-content/55 transition hover:border-primary/40 hover:text-primary"
-                  >
-                    {account.riot_game_name}#{account.riot_tag_line}
-                    <.icon name="hero-arrow-top-right-on-square-mini" class="h-3 w-3" />
-                  </a>
+                <%= for selected_player <- @players do %>
+                  <%= for account <- selected_player.accounts do %>
+                    <a
+                      href={opgg_url(account)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center gap-1 rounded-lg border border-base-300 bg-base-200 px-2.5 py-1 text-xs font-medium text-base-content/55 transition hover:border-primary/40 hover:text-primary"
+                    >
+                      <%= if @comparison? do %>
+                        {selected_player.name} ·
+                      <% end %>
+                      {account.riot_game_name}#{account.riot_tag_line}
+                      <.icon name="hero-arrow-top-right-on-square-mini" class="h-3 w-3" />
+                    </a>
+                  <% end %>
                 <% end %>
               </div>
               <%!-- Player position breakdown --%>
@@ -609,7 +860,7 @@ defmodule ReceiptsWeb.PlayerLive do
               </p>
               <p class="text-xs text-base-content/40">
                 {MapSet.size(@enabled_queues)} queues
-                <%= if @positions_active? do %>
+                <%= if @positions_active? && !@comparison? do %>
                   · {MapSet.size(@enabled_positions)} position{if MapSet.size(@enabled_positions) == 1, do: "", else: "s"}
                 <% end %>
                 <%= if @from_year || @to_year do %>
@@ -669,43 +920,45 @@ defmodule ReceiptsWeb.PlayerLive do
                 </div>
               </div>
 
-              <%!-- Position filter --%>
-              <div>
-                <div class="mb-2 flex items-center justify-between">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                    Position
-                  </p>
-                  <%= if @positions_active? do %>
-                    <button
-                      id="clear-positions"
-                      type="button"
-                      phx-click="clear_positions"
-                      class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-xs font-semibold transition hover:bg-base-300"
-                    >
-                      All positions
-                    </button>
-                  <% end %>
+              <%= if !@comparison? do %>
+                <%!-- Position filter --%>
+                <div>
+                  <div class="mb-2 flex items-center justify-between">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      Position
+                    </p>
+                    <%= if @positions_active? do %>
+                      <button
+                        id="clear-positions"
+                        type="button"
+                        phx-click="clear_positions"
+                        class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-xs font-semibold transition hover:bg-base-300"
+                      >
+                        All positions
+                      </button>
+                    <% end %>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <%= for {pos, label} <- @position_defs do %>
+                      <button
+                        id={"position-toggle-#{pos}"}
+                        phx-click="toggle_position"
+                        phx-value-position={pos}
+                        class={[
+                          "rounded-lg px-4 py-2 text-xs font-bold border transition-colors",
+                          if(MapSet.member?(@enabled_positions, pos),
+                            do: position_filter_active_class(pos),
+                            else:
+                              "border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70"
+                          )
+                        ]}
+                      >
+                        {label}
+                      </button>
+                    <% end %>
+                  </div>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                  <%= for {pos, label} <- @position_defs do %>
-                    <button
-                      id={"position-toggle-#{pos}"}
-                      phx-click="toggle_position"
-                      phx-value-position={pos}
-                      class={[
-                        "rounded-lg px-4 py-2 text-xs font-bold border transition-colors",
-                        if(MapSet.member?(@enabled_positions, pos),
-                          do: position_filter_active_class(pos),
-                          else:
-                            "border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70"
-                        )
-                      ]}
-                    >
-                      {label}
-                    </button>
-                  <% end %>
-                </div>
-              </div>
+              <% end %>
 
               <form id="year-filter-form" phx-change="update_years">
                 <div class="flex flex-wrap items-end gap-4">
@@ -792,6 +1045,230 @@ defmodule ReceiptsWeb.PlayerLive do
 
           <%= if @champions_open do %>
             <div class="border-t border-base-300 px-4 pb-4 pt-3">
+              <%= if @comparison? do %>
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-base-content/40 mr-1">Sort</span>
+                    <button
+                      id="sort-by-games"
+                      phx-click="set_champion_sort"
+                      phx-value-by="games"
+                      class={[
+                        "rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors",
+                        if(@champion_sort == :games,
+                          do: "border-primary bg-primary text-primary-content",
+                          else:
+                            "border-base-300 bg-base-100 text-base-content/60 hover:border-base-content/30"
+                        )
+                      ]}
+                    >
+                      Games
+                    </button>
+                    <button
+                      id="sort-by-winrate"
+                      phx-click="set_champion_sort"
+                      phx-value-by="win_rate"
+                      class={[
+                        "rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors",
+                        if(@champion_sort == :win_rate,
+                          do: "border-primary bg-primary text-primary-content",
+                          else:
+                            "border-base-300 bg-base-100 text-base-content/60 hover:border-base-content/30"
+                        )
+                      ]}
+                    >
+                      Win Rate
+                    </button>
+                    <%= if @champion_sort == :win_rate do %>
+                      <form id="min-games-form" phx-change="set_min_games" class="flex items-center gap-1.5 ml-1">
+                        <span class="text-xs text-base-content/40">min</span>
+                        <input
+                          type="number"
+                          name="min_games"
+                          id="min-games-input"
+                          value={@min_games}
+                          min="1"
+                          placeholder="games"
+                          class="w-20 rounded-md border border-base-300 bg-base-100 px-2 py-1 text-xs text-base-content/80 placeholder-base-content/30 focus:border-primary focus:outline-none"
+                        />
+                      </form>
+                    <% end %>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-base-content/40 mr-1">Show</span>
+                    <%= for {label, n} <- [{"10", 10}, {"20", 20}, {"All", nil}] do %>
+                      <button
+                        id={"limit-#{label}"}
+                        phx-click="set_champion_limit"
+                        phx-value-n={if n, do: n, else: "all"}
+                        class={[
+                          "rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors",
+                          if(@champion_limit == n,
+                            do: "border-primary bg-primary text-primary-content",
+                            else:
+                              "border-base-300 bg-base-100 text-base-content/60 hover:border-base-content/30"
+                          )
+                        ]}
+                      >
+                        {label}
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+
+                <div class="grid gap-4 lg:grid-cols-2">
+                  <%= for selected_player <- @players do %>
+                    <% player_champions = Map.get(@displayed_champions_by_player, selected_player.id, []) %>
+                    <% selected_champion = Map.get(@selected_champions, selected_player.id) %>
+                    <% player_result = Map.get(@player_results, selected_player.id) %>
+                    <% role_stats = Map.get(@position_stats_by_player, selected_player.id, []) %>
+                    <section
+                      id={"player-comparison-#{selected_player.id}"}
+                      class="space-y-4 rounded-xl border border-base-300 bg-base-100/60 p-4"
+                    >
+                      <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h2 class="text-xl font-bold tracking-tight">{selected_player.name}</h2>
+                          <p class="text-xs text-base-content/45">
+                            {length(player_champions)} champions in shared games
+                          </p>
+                        </div>
+                        <%= if selected_champion do %>
+                          <span class="rounded-lg border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
+                            {selected_champion.name}
+                          </span>
+                        <% end %>
+                      </div>
+
+                      <%= if role_stats != [] do %>
+                        <div class="flex flex-wrap gap-2">
+                          <%= for ps <- role_stats do %>
+                            <div class={[
+                              "flex items-center gap-2 rounded-lg border px-3 py-1.5",
+                              position_card_class(ps.position)
+                            ]}>
+                              <span class="text-xs font-bold">{position_label(ps.position)}</span>
+                              <span class="text-xs text-base-content/50">{ps.games}</span>
+                              <span class={["text-xs font-semibold", win_rate_color(ps.win_rate)]}>
+                                {ps.win_rate}%
+                              </span>
+                            </div>
+                          <% end %>
+                        </div>
+                      <% end %>
+
+                      <%= if player_champions == [] do %>
+                        <div class="rounded-xl border border-base-300 bg-base-200 p-8 text-center text-sm text-base-content/40">
+                          No champion games match the shared filters.
+                        </div>
+                      <% else %>
+                        <div class="grid grid-cols-4 gap-2 sm:grid-cols-5 xl:grid-cols-6">
+                          <%= for champ_stat <- player_champions do %>
+                            <button
+                              id={"champ-tile-#{selected_player.id}-#{champ_stat.champion.key}"}
+                              phx-click="select_player_champion"
+                              phx-value-player-id={selected_player.id}
+                              phx-value-key={champ_stat.champion.key}
+                              class={[
+                                "flex flex-col overflow-hidden rounded-xl border text-center transition-all duration-150",
+                                if(selected_champion && selected_champion.id == champ_stat.champion.id,
+                                  do: "border-primary shadow-md ring-1 ring-primary/40",
+                                  else: "border-base-300 bg-base-100 hover:border-primary/50 hover:shadow-sm"
+                                )
+                              ]}
+                            >
+                              <img
+                                src={champion_icon_url(champ_stat.champion)}
+                                alt={champ_stat.champion.name}
+                                class="w-full aspect-square object-cover"
+                                onerror="this.style.display='none'"
+                              />
+                              <div class={[
+                                "flex flex-col items-center gap-1 px-1.5 py-2",
+                                if(selected_champion && selected_champion.id == champ_stat.champion.id,
+                                  do: "bg-primary/10",
+                                  else: "bg-base-100"
+                                )
+                              ]}>
+                                <p class="w-full truncate text-xs font-bold leading-tight">
+                                  {champ_stat.champion.name}
+                                </p>
+                                <p class="text-[0.7rem] font-medium text-base-content/50">
+                                  {champ_stat.games_played} games
+                                </p>
+                                <span class={[
+                                  "rounded px-1.5 py-0.5 text-[0.7rem] font-bold border",
+                                  win_rate_bg(champ_stat.win_rate)
+                                ]}>
+                                  {champ_stat.win_rate}%
+                                </span>
+                              </div>
+                            </button>
+                          <% end %>
+                        </div>
+                      <% end %>
+
+                      <%= if player_result do %>
+                        <div id={"receipts-result-#{selected_player.id}"} class="space-y-3 border-t border-base-300 pt-4">
+                          <div class="grid grid-cols-2 gap-3">
+                            <div class="rounded-xl border border-base-300 bg-base-200 p-3 text-center">
+                              <p class="text-2xl font-bold">{player_result.games_played}</p>
+                              <p class="text-xs text-base-content/50">Games</p>
+                            </div>
+                            <div class="rounded-xl border border-base-300 bg-base-200 p-3 text-center">
+                              <p class={["text-2xl font-bold", win_rate_color(player_result.win_rate)]}>
+                                {player_result.win_rate}%
+                              </p>
+                              <p class="text-xs text-base-content/50">Win Rate</p>
+                            </div>
+                            <div class="rounded-xl border border-base-300 bg-base-200 p-3 text-center">
+                              <p class="text-2xl font-bold">
+                                {player_result.avg_kills}/{player_result.avg_deaths}/{player_result.avg_assists}
+                              </p>
+                              <p class="text-xs text-base-content/50">KDA · {player_result.kda_ratio}:1</p>
+                            </div>
+                            <div class="rounded-xl border border-base-300 bg-base-200 p-3 text-center">
+                              <p class="text-2xl font-bold">{player_result.avg_cs}</p>
+                              <p class="text-xs text-base-content/50">Avg CS</p>
+                            </div>
+                          </div>
+
+                          <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200">
+                            <%= for game <- player_result.recent_games do %>
+                              <div class="flex items-center gap-3 border-b border-base-300 px-3 py-2.5 last:border-b-0">
+                                <div class={[
+                                  "w-1 self-stretch rounded-full shrink-0",
+                                  if(game.win, do: "bg-success", else: "bg-error")
+                                ]} />
+                                <div class={[
+                                  "w-11 shrink-0 rounded-md py-1 text-center text-xs font-bold",
+                                  if(game.win, do: "bg-success/15 text-success", else: "bg-error/15 text-error")
+                                ]}>
+                                  {if game.win, do: "WIN", else: "LOSS"}
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                  <p class="text-sm font-semibold">
+                                    {game.kills}/{game.deaths}/{game.assists}
+                                    <span class="font-normal text-base-content/40 mx-0.5">·</span>
+                                    {game.cs} CS
+                                  </p>
+                                  <p class="text-xs text-base-content/40">{Queue.label(game.match.queue_type)}</p>
+                                </div>
+                                <div class="shrink-0 text-right">
+                                  <p class="text-xs font-medium text-base-content/50">
+                                    {format_duration(game.match.game_duration_seconds)}
+                                  </p>
+                                  <p class="text-xs text-base-content/35">{format_date(game.match.game_datetime)}</p>
+                                </div>
+                              </div>
+                            <% end %>
+                          </div>
+                        </div>
+                      <% end %>
+                    </section>
+                  <% end %>
+                </div>
+              <% else %>
               <%= if @top_champions == [] do %>
                 <div class="py-8 text-center text-base-content/40">
                   <.icon name="hero-chart-bar" class="mx-auto h-8 w-8 mb-2" />
@@ -913,12 +1390,13 @@ defmodule ReceiptsWeb.PlayerLive do
                   <% end %>
                 </div>
               <% end %>
+              <% end %>
             </div>
           <% end %>
         </div>
 
         <%!-- Empty state when no champion selected --%>
-        <%= if is_nil(@selected_champion) && @top_champions != [] do %>
+        <%= if !@comparison? && is_nil(@selected_champion) && @top_champions != [] do %>
           <div class="py-10 text-center text-base-content/40">
             <.icon name="hero-cursor-arrow-rays" class="mx-auto h-8 w-8 mb-2" />
             <p class="text-sm">Select a champion above to view detailed stats.</p>
@@ -926,13 +1404,13 @@ defmodule ReceiptsWeb.PlayerLive do
         <% end %>
 
         <%!-- Results --%>
-        <%= if @result do %>
+        <%= if !@comparison? && @results != [] do %>
           <div id="receipts-result" class="space-y-5">
             <%!-- Title card — cinematic champion banner --%>
             <div class="relative overflow-hidden rounded-2xl border border-white/10 shadow-2xl" style="min-height: 160px;">
               <%!-- Splash art: img tag so it loads reliably, filter via inline style --%>
               <img
-                src={champion_splash_url(@result.champion)}
+                src={champion_splash_url(@selected_champion)}
                 alt=""
                 class="absolute inset-0 h-full w-full object-cover object-right scale-110 pointer-events-none select-none"
                 style="filter: blur(0px) brightness(0.45);"
@@ -946,20 +1424,20 @@ defmodule ReceiptsWeb.PlayerLive do
               <div class="relative flex items-center gap-5 px-7 py-8">
                 <div class="relative shrink-0">
                   <img
-                    src={champion_icon_url(@result.champion)}
-                    alt={@result.champion.name}
+                    src={champion_icon_url(@selected_champion)}
+                    alt={@selected_champion.name}
                     class="h-20 w-20 rounded-2xl object-cover shadow-2xl ring-2 ring-white/20"
                     onerror="this.style.display='none'"
                   />
                 </div>
                 <div class="min-w-0">
                   <p class="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/40">
-                    {@player.name} on
+                    {Enum.map_join(@players, " + ", & &1.name)} on
                   </p>
                   <h2 class="text-5xl font-black leading-none tracking-tight text-white drop-shadow-lg">
-                    {@result.champion.name}
+                    {@selected_champion.name}
                   </h2>
-                  <%= if @result.games_played == 0 do %>
+                  <%= if Enum.all?(@results, &(&1.result.games_played == 0)) do %>
                     <p class="mt-2 text-sm text-white/40">
                       No games on record for the selected filters.
                     </p>
@@ -968,156 +1446,187 @@ defmodule ReceiptsWeb.PlayerLive do
               </div>
             </div>
 
-            <%= if @result.games_played > 0 do %>
-              <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
-                  <p class="text-3xl font-bold">{@result.games_played}</p>
-                  <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
-                    Games
-                  </p>
-                </div>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
-                  <p class={["text-3xl font-bold", win_rate_color(@result.win_rate)]}>
-                    {@result.win_rate}%
-                  </p>
-                  <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
-                    Win Rate
-                  </p>
-                </div>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
-                  <p class="text-3xl font-bold">
-                    {@result.avg_kills}/{@result.avg_deaths}/{@result.avg_assists}
-                  </p>
-                  <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
-                    KDA · {@result.kda_ratio}:1
-                  </p>
-                </div>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
-                  <p class="text-3xl font-bold">{@result.avg_cs}</p>
-                  <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
-                    Avg CS
-                  </p>
-                </div>
-              </div>
-
-              <%!-- Per-champion position breakdown --%>
-              <%= if @result.position_stats != [] do %>
-                <div class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm">
-                  <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
-                    Win Rate by Position
-                  </p>
-                  <div class="flex flex-wrap gap-2">
-                    <%= for ps <- @result.position_stats do %>
-                      <div class={[
-                        "flex items-center gap-2.5 rounded-xl border px-4 py-2.5",
-                        position_card_class(ps.position)
-                      ]}>
-                        <span class="text-sm font-bold">{position_label(ps.position)}</span>
-                        <span class="text-xs text-base-content/50">{ps.games} games</span>
-                        <span class={["text-sm font-bold", win_rate_color(ps.win_rate)]}>
-                          {ps.win_rate}%
+            <div class={[
+              "grid gap-4",
+              if(@comparison?, do: "lg:grid-cols-2 xl:grid-cols-3", else: "grid-cols-1")
+            ]}>
+              <%= for %{player: result_player, result: result} <- @results do %>
+                <div
+                  id={"receipts-result-#{result_player.id}"}
+                  class={[
+                    "space-y-4",
+                    if(@comparison?, do: "rounded-xl border border-base-300 bg-base-200/60 p-4")
+                  ]}
+                >
+                  <%= if @comparison? do %>
+                    <div class="flex items-center justify-between gap-3">
+                      <h3 class="text-xl font-bold tracking-tight">{result_player.name}</h3>
+                      <%= if result.games_played == 0 do %>
+                        <span class="rounded-lg border border-base-300 px-2 py-1 text-xs text-base-content/45">
+                          No games
                         </span>
-                      </div>
-                    <% end %>
-                  </div>
-                </div>
-              <% end %>
-
-              <div class="space-y-2">
-                <% unique_queues = @result.recent_games |> Enum.map(& &1.match.queue_type) |> Enum.uniq() %>
-                <% filtered_games = filter_recent_games(@result.recent_games, @recent_queue_filter) %>
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
-                    Recent Games
-                    <span class="ml-1 font-normal normal-case text-base-content/40">
-                      ({length(filtered_games)} of {length(@result.recent_games)})
-                    </span>
-                  </h3>
-                  <%= if length(unique_queues) > 1 do %>
-                    <div class="flex flex-wrap gap-1">
-                      <button
-                        phx-click="set_recent_queue_filter"
-                        phx-value-queue=""
-                        class={[
-                          "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
-                          if(is_nil(@recent_queue_filter),
-                            do: "bg-primary/80 text-primary-content",
-                            else: "bg-base-300 text-base-content/60 hover:bg-base-300/70"
-                          )
-                        ]}
-                      >All</button>
-                      <%= for queue_type <- unique_queues do %>
-                        <button
-                          phx-click="set_recent_queue_filter"
-                          phx-value-queue={queue_type}
-                          class={[
-                            "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
-                            if(@recent_queue_filter == queue_type,
-                              do: "bg-primary/80 text-primary-content",
-                              else: "bg-base-300 text-base-content/60 hover:bg-base-300/70"
-                            )
-                          ]}
-                        >{Queue.label(queue_type)}</button>
                       <% end %>
                     </div>
                   <% end %>
-                </div>
-                <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
-                  <%= if filtered_games == [] do %>
-                    <div class="py-8 text-center text-sm text-base-content/40">
-                      No games match the selected filters.
-                    </div>
-                  <% end %>
-                  <%= for game <- filtered_games do %>
-                    <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 last:border-b-0 hover:bg-base-300/30 transition-colors">
-                      <%!-- Win/Loss indicator bar on left edge --%>
-                      <div class={[
-                        "w-1 self-stretch rounded-full shrink-0",
-                        if(game.win, do: "bg-success", else: "bg-error")
-                      ]} />
-                      <%!-- WIN/LOSS badge --%>
-                      <div class={[
-                        "w-11 shrink-0 rounded-md py-1 text-center text-xs font-bold tracking-wide",
-                        if(game.win,
-                          do: "bg-success/15 text-success",
-                          else: "bg-error/15 text-error"
-                        )
-                      ]}>
-                        {if game.win, do: "WIN", else: "LOSS"}
+
+                  <%= if result.games_played > 0 do %>
+                    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+                      <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
+                        <p class="text-3xl font-bold">{result.games_played}</p>
+                        <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                          Games
+                        </p>
                       </div>
-                      <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                          <p class="text-sm font-semibold">
-                            {game.kills}/{game.deaths}/{game.assists}
-                            <span class="font-normal text-base-content/40 mx-0.5">·</span>
-                            {game.cs} CS
-                          </p>
-                          <%= if game.position && game.position != "" do %>
-                            <span class={[
-                              "inline-flex items-center rounded px-1.5 py-px text-xs font-bold uppercase tracking-wide ring-1",
-                              position_badge_class(game.position)
+                      <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
+                        <p class={["text-3xl font-bold", win_rate_color(result.win_rate)]}>
+                          {result.win_rate}%
+                        </p>
+                        <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                          Win Rate
+                        </p>
+                      </div>
+                      <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
+                        <p class="text-3xl font-bold">
+                          {result.avg_kills}/{result.avg_deaths}/{result.avg_assists}
+                        </p>
+                        <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                          KDA · {result.kda_ratio}:1
+                        </p>
+                      </div>
+                      <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">
+                        <p class="text-3xl font-bold">{result.avg_cs}</p>
+                        <p class="mt-1 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                          Avg CS
+                        </p>
+                      </div>
+                    </div>
+
+                    <%!-- Per-champion position breakdown --%>
+                    <%= if result.position_stats != [] do %>
+                      <div class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm">
+                        <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                          Win Rate by Position
+                        </p>
+                        <div class="flex flex-wrap gap-2">
+                          <%= for ps <- result.position_stats do %>
+                            <div class={[
+                              "flex items-center gap-2.5 rounded-xl border px-4 py-2.5",
+                              position_card_class(ps.position)
                             ]}>
-                              {position_label(game.position)}
-                            </span>
+                              <span class="text-sm font-bold">{position_label(ps.position)}</span>
+                              <span class="text-xs text-base-content/50">{ps.games} games</span>
+                              <span class={["text-sm font-bold", win_rate_color(ps.win_rate)]}>
+                                {ps.win_rate}%
+                              </span>
+                            </div>
                           <% end %>
                         </div>
-                        <p class="text-xs text-base-content/40 mt-0.5">
-                          {Queue.label(game.match.queue_type)}
-                        </p>
                       </div>
-                      <div class="shrink-0 text-right">
-                        <p class="text-xs font-medium text-base-content/50">
-                          {format_duration(game.match.game_duration_seconds)}
-                        </p>
-                        <p class="text-xs text-base-content/35 mt-0.5">
-                          {format_date(game.match.game_datetime)}
-                        </p>
+                    <% end %>
+
+                    <div class="space-y-2">
+                      <% unique_queues =
+                        result.recent_games |> Enum.map(& &1.match.queue_type) |> Enum.uniq() %>
+                      <% filtered_games = filter_recent_games(result.recent_games, @recent_queue_filter) %>
+                      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                          Recent Games
+                          <span class="ml-1 font-normal normal-case text-base-content/40">
+                            ({length(filtered_games)} of {length(result.recent_games)})
+                          </span>
+                        </h3>
+                        <%= if length(unique_queues) > 1 do %>
+                          <div class="flex flex-wrap gap-1">
+                            <button
+                              phx-click="set_recent_queue_filter"
+                              phx-value-queue=""
+                              class={[
+                                "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                                if(is_nil(@recent_queue_filter),
+                                  do: "bg-primary/80 text-primary-content",
+                                  else: "bg-base-300 text-base-content/60 hover:bg-base-300/70"
+                                )
+                              ]}
+                            >All</button>
+                            <%= for queue_type <- unique_queues do %>
+                              <button
+                                phx-click="set_recent_queue_filter"
+                                phx-value-queue={queue_type}
+                                class={[
+                                  "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                                  if(@recent_queue_filter == queue_type,
+                                    do: "bg-primary/80 text-primary-content",
+                                    else: "bg-base-300 text-base-content/60 hover:bg-base-300/70"
+                                  )
+                                ]}
+                              >{Queue.label(queue_type)}</button>
+                            <% end %>
+                          </div>
+                        <% end %>
                       </div>
+                      <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
+                        <%= if filtered_games == [] do %>
+                          <div class="py-8 text-center text-sm text-base-content/40">
+                            No games match the selected filters.
+                          </div>
+                        <% end %>
+                        <%= for game <- filtered_games do %>
+                          <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 last:border-b-0 hover:bg-base-300/30 transition-colors">
+                            <%!-- Win/Loss indicator bar on left edge --%>
+                            <div class={[
+                              "w-1 self-stretch rounded-full shrink-0",
+                              if(game.win, do: "bg-success", else: "bg-error")
+                            ]} />
+                            <%!-- WIN/LOSS badge --%>
+                            <div class={[
+                              "w-11 shrink-0 rounded-md py-1 text-center text-xs font-bold tracking-wide",
+                              if(game.win,
+                                do: "bg-success/15 text-success",
+                                else: "bg-error/15 text-error"
+                              )
+                            ]}>
+                              {if game.win, do: "WIN", else: "LOSS"}
+                            </div>
+                            <div class="min-w-0 flex-1">
+                              <div class="flex items-center gap-2 flex-wrap">
+                                <p class="text-sm font-semibold">
+                                  {game.kills}/{game.deaths}/{game.assists}
+                                  <span class="font-normal text-base-content/40 mx-0.5">·</span>
+                                  {game.cs} CS
+                                </p>
+                                <%= if game.position && game.position != "" do %>
+                                  <span class={[
+                                    "inline-flex items-center rounded px-1.5 py-px text-xs font-bold uppercase tracking-wide ring-1",
+                                    position_badge_class(game.position)
+                                  ]}>
+                                    {position_label(game.position)}
+                                  </span>
+                                <% end %>
+                              </div>
+                              <p class="text-xs text-base-content/40 mt-0.5">
+                                {Queue.label(game.match.queue_type)}
+                              </p>
+                            </div>
+                            <div class="shrink-0 text-right">
+                              <p class="text-xs font-medium text-base-content/50">
+                                {format_duration(game.match.game_duration_seconds)}
+                              </p>
+                              <p class="text-xs text-base-content/35 mt-0.5">
+                                {format_date(game.match.game_datetime)}
+                              </p>
+                            </div>
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% else %>
+                    <div class="rounded-xl border border-base-300 bg-base-200 p-8 text-center text-sm text-base-content/40">
+                      No {result.champion.name} games in the shared match set.
                     </div>
                   <% end %>
                 </div>
-              </div>
-            <% end %>
+              <% end %>
+            </div>
           </div>
         <% end %>
       </div>

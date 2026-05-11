@@ -16,6 +16,8 @@ defmodule Receipts.LoL.MatchParticipant do
       index([:account_id, :position])
       # "Playing with" join: find all participants in a match on a given team
       index([:match_id, :team_id])
+      # Shared receipts: load known players' rows from the common match set
+      index([:match_id, :account_id])
       # Recent-games query: latest N games for an account sorted by time
       index([:account_id, :game_datetime])
     end

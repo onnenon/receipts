@@ -105,7 +105,7 @@ config :receipts, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 4 * * *", Receipts.Workers.SyncDataDragon},
-       {"* * * * *", Receipts.Workers.SweepAccounts}
+       {"*/5 * * * *", Receipts.Workers.SweepAccounts}
      ]}
   ],
   queues: [default: 10, sync: 5, data_dragon: 2]
