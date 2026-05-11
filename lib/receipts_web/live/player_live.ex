@@ -1035,32 +1035,44 @@ defmodule ReceiptsWeb.PlayerLive do
 
         <%!-- Filters (collapsible) --%>
         <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
-          <button
-            id="toggle-filters-btn"
-            phx-click="toggle_filters"
-            class="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-base-300/40"
-          >
-            <div>
-              <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
-                Filters
-              </p>
-              <p class="text-xs text-base-content/40">
-                {MapSet.size(@enabled_queues)} queues
-                <%= if @positions_active? && !@comparison? do %>
-                  · {MapSet.size(@enabled_positions)} position{if MapSet.size(@enabled_positions) == 1, do: "", else: "s"}
-                <% end %>
-                <%= if @from_year || @to_year do %>
-                  · {if @from_year, do: @from_year, else: "all"} – {if @to_year, do: @to_year, else: "now"}
-                <% else %>
-                  · all time
-                <% end %>
-              </p>
-            </div>
-            <.icon
-              name={if @filters_open, do: "hero-chevron-up-mini", else: "hero-chevron-down-mini"}
-              class="h-4 w-4 shrink-0 text-base-content/40"
-            />
-          </button>
+          <div class="flex items-center gap-3 px-4 py-3">
+            <button
+              id="toggle-filters-title-btn"
+              type="button"
+              phx-click="toggle_filters"
+              class="flex min-w-0 flex-1 text-left transition hover:opacity-80"
+            >
+              <div>
+                <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                  Filters
+                </p>
+                <p class="text-xs text-base-content/40">
+                  {MapSet.size(@enabled_queues)} queues
+                  <%= if @positions_active? && !@comparison? do %>
+                    · {MapSet.size(@enabled_positions)} position{if MapSet.size(@enabled_positions) == 1, do: "", else: "s"}
+                  <% end %>
+                  <%= if @from_year || @to_year do %>
+                    · {if @from_year, do: @from_year, else: "all"} – {if @to_year, do: @to_year, else: "now"}
+                  <% else %>
+                    · all time
+                  <% end %>
+                </p>
+              </div>
+            </button>
+
+            <button
+              id="toggle-filters-btn"
+              type="button"
+              phx-click="toggle_filters"
+              aria-label={if @filters_open, do: "Collapse filters", else: "Expand filters"}
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content"
+            >
+              <.icon
+                name={if @filters_open, do: "hero-chevron-up-mini", else: "hero-chevron-down-mini"}
+                class="h-4 w-4"
+              />
+            </button>
+          </div>
 
           <%= if @filters_open do %>
             <div class="space-y-4 border-t border-base-300 px-4 pb-4 pt-3">
@@ -1244,25 +1256,30 @@ defmodule ReceiptsWeb.PlayerLive do
             <% end %>
 
             <%= if @comp_suggestion_history != [] do %>
-              <div class="border-t border-base-300 px-4 py-2">
+              <div class="border-t border-base-300 px-4 py-2.5">
                 <button
                   id="toggle-comp-suggestion-history"
                   type="button"
                   phx-click="toggle_comp_suggestion_history"
                   aria-expanded={@comp_suggestion_history_open}
                   aria-controls="comp-suggestion-history"
-                  class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold text-base-content/45 transition hover:bg-base-100 hover:text-base-content/70"
+                  class="flex w-full items-center gap-3 text-left transition hover:opacity-80"
                 >
-                  <.icon name="hero-clock-mini" class="h-4 w-4" />
-                  History
-                  <span class="text-base-content/35">({length(@comp_suggestion_history)})</span>
-                  <.icon
-                    name="hero-chevron-down-mini"
-                    class={[
-                      "h-4 w-4 transition-transform",
-                      @comp_suggestion_history_open && "rotate-180"
-                    ]}
-                  />
+                  <span class="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                    <.icon name="hero-clock-mini" class="h-4 w-4 shrink-0" />
+                    History
+                    <span class="text-base-content/35">({length(@comp_suggestion_history)})</span>
+                  </span>
+                  <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content">
+                    <.icon
+                      name={
+                        if @comp_suggestion_history_open,
+                          do: "hero-chevron-up-mini",
+                          else: "hero-chevron-down-mini"
+                      }
+                      class="h-4 w-4"
+                    />
+                  </span>
                 </button>
 
                 <div
@@ -1437,11 +1454,11 @@ defmodule ReceiptsWeb.PlayerLive do
 
         <%!-- Champion roster (collapsible) --%>
         <div class="overflow-hidden rounded-xl border border-base-300 bg-base-200 shadow-sm">
-          <div class="flex items-center gap-3 px-4 py-3">
+          <div class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
             <button
-              id="toggle-champions-btn"
+              id="toggle-champions-title-btn"
               phx-click="toggle_champions"
-              class="flex items-center gap-2 text-left transition hover:opacity-80"
+              class="flex min-w-0 flex-1 text-left transition hover:opacity-80"
             >
               <div>
                 <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
@@ -1451,17 +1468,9 @@ defmodule ReceiptsWeb.PlayerLive do
                   {length(@top_champions)} played · click to view receipts
                 </p>
               </div>
-              <.icon
-                name={
-                  if @champions_open, do: "hero-chevron-up-mini", else: "hero-chevron-down-mini"
-                }
-                class="h-4 w-4 shrink-0 text-base-content/40"
-              />
             </button>
 
-            <div class="flex-1" />
-
-            <form id="champion-search-form" phx-change="filter_champions">
+            <form id="champion-search-form" phx-change="filter_champions" class="sm:w-64">
               <div class="relative">
                 <.icon
                   name="hero-magnifying-glass-mini"
@@ -1474,10 +1483,25 @@ defmodule ReceiptsWeb.PlayerLive do
                   value={@champion_filter}
                   placeholder="Filter champions…"
                   autocomplete="off"
-                  class="rounded-lg border border-base-300 bg-base-100 py-2 pl-8 pr-3 text-sm focus:border-primary focus:outline-none"
+                  class="w-full rounded-lg border border-base-300 bg-base-100 py-2 pl-8 pr-3 text-sm focus:border-primary focus:outline-none"
                 />
               </div>
             </form>
+
+            <button
+              id="toggle-champions-btn"
+              type="button"
+              phx-click="toggle_champions"
+              aria-label={if @champions_open, do: "Collapse champions", else: "Expand champions"}
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content"
+            >
+              <.icon
+                name={
+                  if @champions_open, do: "hero-chevron-up-mini", else: "hero-chevron-down-mini"
+                }
+                class="h-4 w-4"
+              />
+            </button>
           </div>
 
           <%= if @champions_open do %>
