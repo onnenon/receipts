@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for receipts-drifting-driftwood-9335 on 2026-05-10T23:51:55-05:00
+# fly.toml app configuration file generated for receipts-drifting-driftwood-9335 on 2026-05-11T05:12:10Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -30,6 +30,8 @@ hard_limit = 1000
 soft_limit = 1000
 
 [[vm]]
-memory = '1gb'
+memory = '2gb'
 cpus = 1
-memory_mb = 1024
+memory_mb = 2048
+cpu_kind = 'shared'
+size = 'shared-cpu-1x'
