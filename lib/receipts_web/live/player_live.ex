@@ -31,12 +31,19 @@ defmodule ReceiptsWeb.PlayerLive do
             queue_types: MapSet.to_list(enabled_queues)
           )
 
+        player_position_stats =
+          Queries.position_breakdown_for_player(player.id,
+            queue_types: MapSet.to_list(enabled_queues)
+          )
+
         {:ok,
          socket
          |> assign(:player, player)
          |> assign(:all_champions, all_champions)
          |> assign(:top_champions, top_champions)
+         |> assign(:player_position_stats, player_position_stats)
          |> assign(:enabled_queues, enabled_queues)
+         |> assign(:enabled_positions, MapSet.new())
          |> assign(:from_year, nil)
          |> assign(:to_year, nil)
          |> assign(:selected_champion, nil)
@@ -119,6 +126,21 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   @impl true
+  def handle_event("toggle_position", %{"position" => position}, socket) do
+    enabled =
+      if MapSet.member?(socket.assigns.enabled_positions, position),
+        do: MapSet.delete(socket.assigns.enabled_positions, position),
+        else: MapSet.put(socket.assigns.enabled_positions, position)
+
+    {:noreply, socket |> assign(:enabled_positions, enabled) |> maybe_rerun()}
+  end
+
+  @impl true
+  def handle_event("clear_positions", _, socket) do
+    {:noreply, socket |> assign(:enabled_positions, MapSet.new()) |> maybe_rerun()}
+  end
+
+  @impl true
   def handle_event("toggle_queue", %{"queue" => queue}, socket) do
     enabled =
       if MapSet.member?(socket.assigns.enabled_queues, queue),
@@ -164,16 +186,35 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   defp refresh_top_champions(socket) do
-    %{player: player, enabled_queues: eq, from_year: from_year, to_year: to_year} = socket.assigns
+    %{
+      player: player,
+      enabled_queues: eq,
+      enabled_positions: ep,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    positions = MapSet.to_list(ep)
+    queue_types = MapSet.to_list(eq)
 
     top_champions =
       Queries.top_champions_for_player(player.id,
-        queue_types: MapSet.to_list(eq),
+        queue_types: queue_types,
+        positions: positions,
         from_year: from_year,
         to_year: to_year
       )
 
-    assign(socket, :top_champions, top_champions)
+    player_position_stats =
+      Queries.position_breakdown_for_player(player.id,
+        queue_types: queue_types,
+        from_year: from_year,
+        to_year: to_year
+      )
+
+    socket
+    |> assign(:top_champions, top_champions)
+    |> assign(:player_position_stats, player_position_stats)
   end
 
   defp run_query(socket) do
@@ -181,11 +222,17 @@ defmodule ReceiptsWeb.PlayerLive do
       player: player,
       selected_champion: champion,
       enabled_queues: eq,
+      enabled_positions: ep,
       from_year: from_year,
       to_year: to_year
     } = socket.assigns
 
-    opts = [queue_types: MapSet.to_list(eq), from_year: from_year, to_year: to_year]
+    opts = [
+      queue_types: MapSet.to_list(eq),
+      positions: MapSet.to_list(ep),
+      from_year: from_year,
+      to_year: to_year
+    ]
 
     case Queries.receipts(player.id, champion.key, opts) do
       {:ok, result} ->
@@ -309,6 +356,16 @@ defmodule ReceiptsWeb.PlayerLive do
     Enum.filter(games, &(&1.match.queue_type == queue_filter))
   end
 
+  @position_defs [
+    {"TOP", "Top"},
+    {"JUNGLE", "Jungle"},
+    {"MIDDLE", "Mid"},
+    {"BOTTOM", "Bot"},
+    {"UTILITY", "Support"}
+  ]
+
+  defp position_defs, do: @position_defs
+
   defp position_label("TOP"), do: "Top"
   defp position_label("JUNGLE"), do: "Jungle"
   defp position_label("MIDDLE"), do: "Mid"
@@ -323,6 +380,33 @@ defmodule ReceiptsWeb.PlayerLive do
   defp position_badge_class("BOTTOM"), do: "bg-rose-500/20 text-rose-400 ring-rose-500/20"
   defp position_badge_class("UTILITY"), do: "bg-violet-500/20 text-violet-400 ring-violet-500/20"
   defp position_badge_class(_), do: "bg-base-300/50 text-base-content/50 ring-base-300/50"
+
+  defp position_filter_active_class("TOP"), do: "bg-amber-500 text-white border-amber-500"
+  defp position_filter_active_class("JUNGLE"), do: "bg-emerald-500 text-white border-emerald-500"
+  defp position_filter_active_class("MIDDLE"), do: "bg-sky-500 text-white border-sky-500"
+  defp position_filter_active_class("BOTTOM"), do: "bg-rose-500 text-white border-rose-500"
+  defp position_filter_active_class("UTILITY"), do: "bg-violet-500 text-white border-violet-500"
+  defp position_filter_active_class(_), do: "bg-primary text-primary-content border-primary"
+
+  defp position_card_class("TOP"), do: "border-amber-500/30 bg-amber-500/10"
+  defp position_card_class("JUNGLE"), do: "border-emerald-500/30 bg-emerald-500/10"
+  defp position_card_class("MIDDLE"), do: "border-sky-500/30 bg-sky-500/10"
+  defp position_card_class("BOTTOM"), do: "border-rose-500/30 bg-rose-500/10"
+  defp position_card_class("UTILITY"), do: "border-violet-500/30 bg-violet-500/10"
+  defp position_card_class(_), do: "border-base-300 bg-base-300/50"
+
+  defp queue_button_class(queue_type, enabled_queues, positions_active?) do
+    cond do
+      positions_active? && !Queue.has_positions?(queue_type) ->
+        "border-base-300/40 text-base-content/25 opacity-40 cursor-not-allowed"
+
+      MapSet.member?(enabled_queues, queue_type) ->
+        "bg-primary text-primary-content border-primary"
+
+      true ->
+        "border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70"
+    end
+  end
 
   defp win_rate_color(rate) when rate >= 55.0, do: "text-success"
   defp win_rate_color(rate) when rate < 45.0, do: "text-error"
@@ -383,6 +467,8 @@ defmodule ReceiptsWeb.PlayerLive do
     assigns =
       assigns
       |> assign(:queue_defs, Queue.ui_queues())
+      |> assign(:position_defs, position_defs())
+      |> assign(:positions_active?, MapSet.size(assigns.enabled_positions) > 0)
       |> assign(:total_games, total_games(assigns.top_champions))
       |> assign(:overall_wr, overall_win_rate(assigns.top_champions))
       |> assign(
@@ -464,6 +550,25 @@ defmodule ReceiptsWeb.PlayerLive do
                   </a>
                 <% end %>
               </div>
+              <%!-- Player position breakdown --%>
+              <%= if @player_position_stats != [] do %>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <%= for ps <- @player_position_stats do %>
+                    <div class={[
+                      "flex items-center gap-2 rounded-lg border px-3 py-1.5",
+                      position_card_class(ps.position)
+                    ]}>
+                      <span class="text-xs font-bold text-base-content/80">
+                        {position_label(ps.position)}
+                      </span>
+                      <span class="text-xs text-base-content/50">{ps.games} games</span>
+                      <span class={["text-xs font-semibold", win_rate_color(ps.win_rate)]}>
+                        {ps.win_rate}%
+                      </span>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
             </div>
           </div>
         </div>
@@ -481,6 +586,9 @@ defmodule ReceiptsWeb.PlayerLive do
               </p>
               <p class="text-xs text-base-content/40">
                 {MapSet.size(@enabled_queues)} queues
+                <%= if @positions_active? do %>
+                  · {MapSet.size(@enabled_positions)} position{if MapSet.size(@enabled_positions) == 1, do: "", else: "s"}
+                <% end %>
                 <%= if @from_year || @to_year do %>
                   · {if @from_year, do: @from_year, else: "all"} – {if @to_year, do: @to_year, else: "now"}
                 <% else %>
@@ -526,10 +634,45 @@ defmodule ReceiptsWeb.PlayerLive do
                       id={"queue-toggle-#{queue_type}"}
                       phx-click="toggle_queue"
                       phx-value-queue={queue_type}
+                      disabled={@positions_active? && !Queue.has_positions?(queue_type)}
                       class={[
                         "rounded-lg px-3 py-2 text-left text-xs font-semibold border transition-colors",
-                        if(MapSet.member?(@enabled_queues, queue_type),
-                          do: "bg-primary text-primary-content border-primary",
+                        queue_button_class(queue_type, @enabled_queues, @positions_active?)
+                      ]}
+                    >
+                      {label}
+                    </button>
+                  <% end %>
+                </div>
+              </div>
+
+              <%!-- Position filter --%>
+              <div>
+                <div class="mb-2 flex items-center justify-between">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                    Position
+                  </p>
+                  <%= if @positions_active? do %>
+                    <button
+                      id="clear-positions"
+                      type="button"
+                      phx-click="clear_positions"
+                      class="rounded-lg border border-base-300 bg-base-100 px-3 py-1.5 text-xs font-semibold transition hover:bg-base-300"
+                    >
+                      All positions
+                    </button>
+                  <% end %>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <%= for {pos, label} <- @position_defs do %>
+                    <button
+                      id={"position-toggle-#{pos}"}
+                      phx-click="toggle_position"
+                      phx-value-position={pos}
+                      class={[
+                        "rounded-lg px-4 py-2 text-xs font-bold border transition-colors",
+                        if(MapSet.member?(@enabled_positions, pos),
+                          do: position_filter_active_class(pos),
                           else:
                             "border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70"
                         )
@@ -833,6 +976,29 @@ defmodule ReceiptsWeb.PlayerLive do
                   </p>
                 </div>
               </div>
+
+              <%!-- Per-champion position breakdown --%>
+              <%= if @result.position_stats != [] do %>
+                <div class="rounded-xl border border-base-300 bg-base-200 p-4 shadow-sm">
+                  <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                    Win Rate by Position
+                  </p>
+                  <div class="flex flex-wrap gap-2">
+                    <%= for ps <- @result.position_stats do %>
+                      <div class={[
+                        "flex items-center gap-2.5 rounded-xl border px-4 py-2.5",
+                        position_card_class(ps.position)
+                      ]}>
+                        <span class="text-sm font-bold">{position_label(ps.position)}</span>
+                        <span class="text-xs text-base-content/50">{ps.games} games</span>
+                        <span class={["text-sm font-bold", win_rate_color(ps.win_rate)]}>
+                          {ps.win_rate}%
+                        </span>
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
 
               <div class="space-y-2">
                 <% unique_queues = @result.recent_games |> Enum.map(& &1.match.queue_type) |> Enum.uniq() %>

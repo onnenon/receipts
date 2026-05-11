@@ -54,6 +54,9 @@ defmodule Receipts.LoL.Queue do
     {"other", "Other", false}
   ]
 
+  # Queue types that have lane position data from Riot's teamPosition field
+  @position_queues ~w(ranked_solo ranked_flex normal_draft normal_blind clash)
+
   def from_id(queue_id) when is_integer(queue_id) do
     Map.get(@queue_map, queue_id, "other")
   end
@@ -67,4 +70,6 @@ defmodule Receipts.LoL.Queue do
   def default_queues do
     for {type, _label, true} <- @ui_queues, do: type
   end
+
+  def has_positions?(queue_type), do: queue_type in @position_queues
 end

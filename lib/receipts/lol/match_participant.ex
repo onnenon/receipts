@@ -10,6 +10,10 @@ defmodule Receipts.LoL.MatchParticipant do
     custom_indexes do
       # Core receipts query: player's stats on a champion
       index([:account_id, :champion_id])
+      # Position-filtered receipts: player's stats on a champion at a specific position
+      index([:account_id, :champion_id, :position])
+      # Position-filtered roster: player's stats at a position across all champions
+      index([:account_id, :position])
       # "Playing with" join: find all participants in a match on a given team
       index([:match_id, :team_id])
       # Recent-games query: latest N games for an account sorted by time

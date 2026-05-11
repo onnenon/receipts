@@ -13,6 +13,7 @@ defmodule Receipts.LoL.Queries do
 
   Options:
     - `:queue_types` — list of queue type strings to include. Defaults to `Queue.default_queues/0`.
+    - `:positions` — list of position strings to include (e.g. `["TOP", "MIDDLE"]`). `[]` = all.
     - `:from_year` — integer year (inclusive lower bound on game_datetime). nil = no lower bound.
     - `:to_year` — integer year (inclusive upper bound on game_datetime). nil = no upper bound.
   """
@@ -155,7 +156,7 @@ defmodule Receipts.LoL.Queries do
     end)
   end
 
-  def top_champions_for_player(player_id, opts \\ []) do
+  def position_breakdown_for_player(player_id, opts \\ []) do
     queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
     from_year = Keyword.get(opts, :from_year)
     to_year = Keyword.get(opts, :to_year)
@@ -170,6 +171,38 @@ defmodule Receipts.LoL.Queries do
         |> Ash.Query.filter(account_id in ^account_ids)
         |> Ash.Query.filter(queue_type in ^queue_types)
         |> apply_year_filters(from_year, to_year)
+        |> Ash.read!()
+      end
+
+    participants
+    |> Enum.reject(&is_nil(&1.position))
+    |> Enum.group_by(& &1.position)
+    |> Enum.map(fn {pos, parts} ->
+      g = length(parts)
+      w = Enum.count(parts, & &1.win)
+      wr = if g > 0, do: Float.round(w / g * 100, 1), else: 0.0
+      %{position: pos, games: g, wins: w, win_rate: wr}
+    end)
+    |> Enum.sort_by(fn %{games: g} -> -g end)
+  end
+
+  def top_champions_for_player(player_id, opts \\ []) do
+    queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+    from_year = Keyword.get(opts, :from_year)
+    to_year = Keyword.get(opts, :to_year)
+    positions = Keyword.get(opts, :positions, [])
+
+    account_ids = account_ids_for_player(player_id)
+
+    participants =
+      if account_ids == [] do
+        []
+      else
+        MatchParticipant
+        |> Ash.Query.filter(account_id in ^account_ids)
+        |> Ash.Query.filter(queue_type in ^queue_types)
+        |> apply_year_filters(from_year, to_year)
+        |> apply_position_filter(positions)
         |> Ash.Query.load(:champion)
         |> Ash.read!()
       end
@@ -231,6 +264,7 @@ defmodule Receipts.LoL.Queries do
     queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
     from_year = Keyword.get(opts, :from_year, nil)
     to_year = Keyword.get(opts, :to_year, nil)
+    positions = Keyword.get(opts, :positions, [])
 
     account_ids = account_ids_for_player(player_id)
 
@@ -243,6 +277,7 @@ defmodule Receipts.LoL.Queries do
         |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
         |> Ash.Query.filter(queue_type in ^queue_types)
         |> apply_year_filters(from_year, to_year)
+        |> apply_position_filter(positions)
         |> Ash.read!()
       end
 
@@ -269,7 +304,19 @@ defmodule Receipts.LoL.Queries do
         do: Float.round((avg_kills + avg_assists) / avg_deaths, 2),
         else: Float.round(avg_kills + avg_assists, 2)
 
-    # Separate query for recent games: sorted in SQL, only 5 rows, match loaded.
+    position_stats =
+      all_participants
+      |> Enum.reject(&is_nil(&1.position))
+      |> Enum.group_by(& &1.position)
+      |> Enum.map(fn {pos, parts} ->
+        g = length(parts)
+        w = Enum.count(parts, & &1.win)
+        wr = if g > 0, do: Float.round(w / g * 100, 1), else: 0.0
+        %{position: pos, games: g, wins: w, win_rate: wr}
+      end)
+      |> Enum.sort_by(fn %{games: g} -> -g end)
+
+    # Separate query for recent games: sorted in SQL, only 20 rows, match loaded.
     recent_games =
       if account_ids == [] do
         []
@@ -278,6 +325,7 @@ defmodule Receipts.LoL.Queries do
         |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
         |> Ash.Query.filter(queue_type in ^queue_types)
         |> apply_year_filters(from_year, to_year)
+        |> apply_position_filter(positions)
         |> Ash.Query.sort(game_datetime: :desc)
         |> Ash.Query.limit(20)
         |> Ash.Query.load(:match)
@@ -294,8 +342,15 @@ defmodule Receipts.LoL.Queries do
       avg_assists: avg_assists,
       kda_ratio: kda_ratio,
       avg_cs: avg_cs,
+      position_stats: position_stats,
       recent_games: recent_games
     }
+  end
+
+  defp apply_position_filter(query, positions) when positions in [nil, []], do: query
+
+  defp apply_position_filter(query, positions) do
+    Ash.Query.filter(query, position in ^positions)
   end
 
   defp apply_year_filters(query, from_year, to_year) do
