@@ -65,6 +65,44 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     refute has_element?(view, "#receipts-result-#{player_a.id}", "20/1/3")
   end
 
+  test "three player comparison defaults to ranked flex and disables solo duo", %{conn: conn} do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+    player_c = create_player("Kovu")
+
+    account_a = create_account(player_a, "A")
+    account_b = create_account(player_b, "B")
+    account_c = create_account(player_c, "C")
+    ahri = create_champion("Ahri", 103)
+
+    solo_match = create_match("solo-three", ~U[2026-05-10 12:00:00Z])
+
+    flex_match =
+      create_match("flex-three", ~U[2026-05-10 13:00:00Z],
+        queue_id: 440,
+        queue_type: "ranked_flex"
+      )
+
+    create_participant(account_a, solo_match, ahri, true, kills: 20)
+    create_participant(account_b, solo_match, ahri, true, kills: 15)
+    create_participant(account_c, solo_match, ahri, true, kills: 12)
+
+    create_participant(account_a, flex_match, ahri, true, kills: 6)
+    create_participant(account_b, flex_match, ahri, true, kills: 4)
+    create_participant(account_c, flex_match, ahri, true, kills: 2)
+
+    player_ids = Enum.join([player_a.id, player_b.id, player_c.id], ",")
+    {:ok, view, _html} = live(conn, ~p"/players?ids=#{player_ids}")
+
+    assert has_element?(view, "#queue-toggle-ranked_solo[disabled]")
+    refute has_element?(view, "#queue-toggle-ranked_flex[disabled]")
+
+    view |> element("#champ-tile-#{player_a.id}-Ahri") |> render_click()
+
+    assert has_element?(view, "#receipts-result-#{player_a.id}", "6/1/3")
+    refute has_element?(view, "#receipts-result-#{player_a.id}", "20/1/3")
+  end
+
   test "comp suggestion button is admin only", %{conn: conn} do
     player_a = create_player("Koozie")
     player_b = create_player("Kupo")
@@ -323,8 +361,15 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     player_b = create_player("Kupo")
     player_ids = [player_a.id, player_b.id]
 
-    stored_comp = create_comp_suggestion(player_ids, DateTime.add(DateTime.utc_now(), -2, :day), "Old comp.")
-    stored_analysis = create_win_loss_analysis(player_ids, DateTime.add(DateTime.utc_now(), -2, :day), "Old analysis.")
+    stored_comp =
+      create_comp_suggestion(player_ids, DateTime.add(DateTime.utc_now(), -2, :day), "Old comp.")
+
+    stored_analysis =
+      create_win_loss_analysis(
+        player_ids,
+        DateTime.add(DateTime.utc_now(), -2, :day),
+        "Old analysis."
+      )
 
     {:ok, view, _html} = live(conn, ~p"/players?ids=#{Enum.join(player_ids, ",")}")
 
@@ -372,14 +417,14 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     |> Ash.create!()
   end
 
-  defp create_match(id, game_datetime) do
+  defp create_match(id, game_datetime, opts \\ []) do
     Match
     |> Ash.Changeset.for_create(:create, %{
       riot_match_id: "NA1_#{id}_#{unique_id()}",
       game_datetime: game_datetime,
       game_duration_seconds: 1800,
-      queue_id: 420,
-      queue_type: "ranked_solo",
+      queue_id: Keyword.get(opts, :queue_id, 420),
+      queue_type: Keyword.get(opts, :queue_type, "ranked_solo"),
       raw_info: %{}
     })
     |> Ash.create!()

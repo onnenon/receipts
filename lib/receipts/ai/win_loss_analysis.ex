@@ -132,10 +132,12 @@ defmodule Receipts.AI.WinLossAnalysis do
     [
       system_instruction: """
       You are analyzing recent League of Legends games for a private friend group.
-      Use only the supplied JSON. Identify why games are being won or lost, who is
-      underperforming, who is carrying hard, and what concrete adjustments the group
-      should try. Anchor claims in stat lines from recent shared games first, then
-      recent individual form.
+      Use only the supplied JSON. Give balanced feedback: celebrate who is carrying
+      or making games easier, call out who is underperforming, and point lighthearted
+      blame where the stat lines support it. Do not favor wins or losses by default;
+      explain what is working in wins, what is breaking in losses, and what concrete
+      adjustments the group should try. Anchor claims in stat lines from recent shared
+      games first, then recent individual form.
       Be explicit about small samples and team context. Do not invent player history.
       All players in this friend group are men; use he/him/his pronouns for every player.
       Write blunt but fair user-facing prose. Never include raw JSON path names, snake_case keys,
@@ -152,7 +154,9 @@ defmodule Receipts.AI.WinLossAnalysis do
     Generate a game analysis for this selected group.
 
     Return JSON matching the schema. Use player_id values exactly as provided.
-    Cover both wins and losses, including who is carrying hard and who is not pulling weight.
+    Cover both wins and losses without treating either as more important by default.
+    Include kudos, useful feedback, and fun-but-fair blame for who is carrying hard
+    and who is not pulling weight.
 
     Context:
     #{Jason.encode!(context)}

@@ -23,7 +23,7 @@ defmodule ReceiptsWeb.PlayerLive do
       [player | _] ->
         player_ids = Enum.map(players, & &1.id)
         all_champions = Ash.read!(Champion) |> Enum.sort_by(& &1.name)
-        enabled_queues = MapSet.new(Queue.default_queues())
+        enabled_queues = default_enabled_queues(players)
         comparison? = length(players) > 1
         queue_types = MapSet.to_list(enabled_queues)
 
@@ -235,19 +235,26 @@ defmodule ReceiptsWeb.PlayerLive do
 
   @impl true
   def handle_event("toggle_queue", %{"queue" => queue}, socket) do
-    enabled =
-      if MapSet.member?(socket.assigns.enabled_queues, queue),
-        do: MapSet.delete(socket.assigns.enabled_queues, queue),
-        else: MapSet.put(socket.assigns.enabled_queues, queue)
+    if queue_disabled?(queue, socket.assigns, MapSet.size(socket.assigns.enabled_positions) > 0) do
+      {:noreply, socket}
+    else
+      enabled =
+        if MapSet.member?(socket.assigns.enabled_queues, queue),
+          do: MapSet.delete(socket.assigns.enabled_queues, queue),
+          else: MapSet.put(socket.assigns.enabled_queues, queue)
 
-    {:noreply, socket |> assign(:enabled_queues, enabled) |> maybe_rerun()}
+      {:noreply, socket |> assign(:enabled_queues, enabled) |> maybe_rerun()}
+    end
   end
 
   @impl true
   def handle_event("select_all_queues", _, socket) do
+    positions_active? = MapSet.size(socket.assigns.enabled_positions) > 0
+
     enabled =
       Queue.ui_queues()
       |> Enum.map(fn {queue_type, _label, _default} -> queue_type end)
+      |> Enum.reject(&queue_disabled?(&1, socket.assigns, positions_active?))
       |> MapSet.new()
 
     {:noreply, socket |> assign(:enabled_queues, enabled) |> maybe_rerun()}
@@ -951,12 +958,24 @@ defmodule ReceiptsWeb.PlayerLive do
   defp position_card_class("UTILITY"), do: "border-violet-500/30 bg-violet-500/10"
   defp position_card_class(_), do: "border-base-300 bg-base-300/50"
 
-  defp queue_button_class(queue_type, enabled_queues, positions_active?) do
+  defp default_enabled_queues(players) when length(players) > 2, do: MapSet.new(["ranked_flex"])
+  defp default_enabled_queues(_players), do: MapSet.new(Queue.default_queues())
+
+  defp queue_disabled?(queue_type, assigns, positions_active?) do
+    position_queue_disabled? = positions_active? && !Queue.has_positions?(queue_type)
+
+    group_queue_disabled? =
+      assigns.comparison? && length(assigns.players) > 2 && queue_type == "ranked_solo"
+
+    position_queue_disabled? || group_queue_disabled?
+  end
+
+  defp queue_button_class(queue_type, assigns, positions_active?) do
     cond do
-      positions_active? && !Queue.has_positions?(queue_type) ->
+      queue_disabled?(queue_type, assigns, positions_active?) ->
         "border-base-300/40 text-base-content/25 opacity-40 cursor-not-allowed"
 
-      MapSet.member?(enabled_queues, queue_type) ->
+      MapSet.member?(assigns.enabled_queues, queue_type) ->
         "bg-primary text-primary-content border-primary"
 
       true ->
@@ -1283,10 +1302,10 @@ defmodule ReceiptsWeb.PlayerLive do
                       id={"queue-toggle-#{queue_type}"}
                       phx-click="toggle_queue"
                       phx-value-queue={queue_type}
-                      disabled={@positions_active? && !Queue.has_positions?(queue_type)}
+                      disabled={queue_disabled?(queue_type, assigns, @positions_active?)}
                       class={[
                         "rounded-lg px-3 py-2 text-left text-xs font-semibold border transition-colors",
-                        queue_button_class(queue_type, @enabled_queues, @positions_active?)
+                        queue_button_class(queue_type, assigns, @positions_active?)
                       ]}
                     >
                       {label}
