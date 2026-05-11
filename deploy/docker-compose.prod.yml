@@ -5,6 +5,7 @@ x-app: &app
     context: ..
     dockerfile: Dockerfile
     args:
+      SOURCE_BUILT_AT: ${RECEIPTS_BUILT_AT:-unknown}
       SOURCE_VERSION: ${RECEIPTS_VERSION:-unknown}
   image: receipts-app:${RECEIPTS_IMAGE_TAG:-local}
   environment:

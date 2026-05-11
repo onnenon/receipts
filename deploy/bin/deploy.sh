@@ -27,9 +27,13 @@ if [[ -z "${RECEIPTS_VERSION:-}" ]]; then
   fi
 fi
 
+RECEIPTS_BUILT_AT=${RECEIPTS_BUILT_AT:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
+
+export RECEIPTS_BUILT_AT
 export RECEIPTS_VERSION
 
 echo "Deploying receipts version: $RECEIPTS_VERSION"
+echo "Build timestamp: $RECEIPTS_BUILT_AT"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build web migrate
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres
