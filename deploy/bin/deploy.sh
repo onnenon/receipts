@@ -38,5 +38,5 @@ echo "Build timestamp: $RECEIPTS_BUILT_AT"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build web migrate
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm migrate
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d web cloudflared postgres_exporter prometheus grafana
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d web cloudflared loki promtail postgres_exporter prometheus grafana
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps

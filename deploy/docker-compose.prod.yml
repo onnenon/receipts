@@ -69,6 +69,28 @@ services:
     networks:
       - receipts
 
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki.yml
+    networks:
+      - receipts
+
+  promtail:
+    image: grafana/promtail:latest
+    restart: unless-stopped
+    volumes:
+      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail.yml
+    depends_on:
+      - loki
+    networks:
+      - receipts
+
   postgres_exporter:
     image: prometheuscommunity/postgres-exporter:latest
     restart: unless-stopped
@@ -101,8 +123,6 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required}
-      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     ports:
       - "3000:3000"
     volumes:
@@ -115,6 +135,7 @@ services:
 
 volumes:
   postgres_data:
+  loki_data:
   prometheus_data:
   grafana_data:
 
