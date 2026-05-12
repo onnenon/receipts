@@ -5,7 +5,7 @@ defmodule Receipts.LoL.Queries do
 
   require Ash.Query
 
-  alias Receipts.LoL.{Account, Champion, MatchParticipant, Player, Queue}
+  alias Receipts.LoL.{Account, Champion, Match, MatchParticipant, Player, Queue}
   alias Receipts.Repo
 
   @doc """
@@ -143,60 +143,86 @@ defmodule Receipts.LoL.Queries do
       |> Ash.Query.filter(player_id in ^player_ids)
       |> Ash.read!()
 
-    account_player_ids = Map.new(accounts, &{&1.id, &1.player_id})
-    account_ids = Map.keys(account_player_ids)
     accounts_by_player = Enum.group_by(accounts, & &1.player_id)
-
-    participants =
-      if account_ids == [] do
-        []
-      else
-        MatchParticipant
-        |> Ash.Query.filter(account_id in ^account_ids)
-        |> Ash.Query.load(:champion)
-        |> Ash.read!()
-      end
-
-    participants_by_player =
-      Enum.group_by(participants, fn p -> Map.fetch!(account_player_ids, p.account_id) end)
+    totals_by_player = player_home_totals(player_ids)
+    top_champions_by_player = player_home_top_champions(player_ids)
 
     Map.new(player_ids, fn player_id ->
-      player_participants = Map.get(participants_by_player, player_id, [])
-
-      total_games = length(player_participants)
-      total_wins = Enum.count(player_participants, & &1.win)
+      totals = Map.get(totals_by_player, player_id, %{total_games: 0, total_wins: 0})
+      total_games = totals.total_games
+      total_wins = totals.total_wins
 
       overall_win_rate =
         if total_games > 0, do: Float.round(total_wins / total_games * 100, 1), else: 0.0
-
-      top_champion =
-        player_participants
-        |> Enum.group_by(& &1.champion_id)
-        |> Enum.map(fn {_, parts} ->
-          games = length(parts)
-          wins = Enum.count(parts, & &1.win)
-          wr = if games > 0, do: Float.round(wins / games * 100, 1), else: 0.0
-
-          %{
-            champion: hd(parts).champion,
-            games_played: games,
-            wins: wins,
-            win_rate: wr
-          }
-        end)
-        |> Enum.sort_by(&{-&1.games_played, &1.champion.name})
-        |> List.first()
 
       player_accounts = Map.get(accounts_by_player, player_id, [])
 
       {player_id,
        %{
-         top_champion: top_champion,
+         top_champion: Map.get(top_champions_by_player, player_id),
          total_games: total_games,
          total_wins: total_wins,
          overall_win_rate: overall_win_rate,
          best_rank: best_rank_for_accounts(player_accounts)
        }}
+    end)
+  end
+
+  defp player_home_totals([]), do: %{}
+
+  defp player_home_totals(player_ids) do
+    MatchParticipant
+    |> join(:inner, [participant], account in Account, on: account.id == participant.account_id)
+    |> where([_participant, account], account.player_id in ^player_ids)
+    |> group_by([_participant, account], account.player_id)
+    |> select([participant, account], %{
+      player_id: account.player_id,
+      total_games: count(participant.id),
+      total_wins: fragment("sum(CASE WHEN ? THEN 1 ELSE 0 END)", participant.win)
+    })
+    |> Repo.all()
+    |> Map.new(fn row ->
+      {row.player_id, %{total_games: row.total_games, total_wins: row.total_wins || 0}}
+    end)
+  end
+
+  defp player_home_top_champions([]), do: %{}
+
+  defp player_home_top_champions(player_ids) do
+    MatchParticipant
+    |> join(:inner, [participant], account in Account, on: account.id == participant.account_id)
+    |> join(:inner, [participant, _account], champion in Champion,
+      on: champion.id == participant.champion_id
+    )
+    |> where([_participant, account], account.player_id in ^player_ids)
+    |> group_by([_participant, account, champion], [account.player_id, champion.id])
+    |> select([participant, account, champion], %{
+      player_id: account.player_id,
+      champion: champion,
+      games_played: count(participant.id),
+      wins: fragment("sum(CASE WHEN ? THEN 1 ELSE 0 END)", participant.win)
+    })
+    |> Repo.all()
+    |> Enum.map(fn row ->
+      games_played = row.games_played
+      wins = row.wins || 0
+
+      %{
+        player_id: row.player_id,
+        champion: row.champion,
+        games_played: games_played,
+        wins: wins,
+        win_rate: if(games_played > 0, do: Float.round(wins / games_played * 100, 1), else: 0.0)
+      }
+    end)
+    |> Enum.group_by(& &1.player_id)
+    |> Map.new(fn {player_id, summaries} ->
+      top =
+        summaries
+        |> Enum.sort_by(&{-&1.games_played, &1.champion.name})
+        |> List.first()
+
+      {player_id, top}
     end)
   end
 
@@ -609,7 +635,7 @@ defmodule Receipts.LoL.Queries do
                   from_year: from_year,
                   to_year: to_year,
                   match_ids: shared_match_ids,
-                  load: [:champion, :match]
+                  load: [:champion, match: match_summary_query()]
                 )
 
               {player.id, participants}
@@ -839,6 +865,15 @@ defmodule Receipts.LoL.Queries do
   defp maybe_load(query, []), do: query
   defp maybe_load(query, load), do: Ash.Query.load(query, load)
 
+  defp match_summary_query do
+    Ash.Query.select(Match, [
+      :riot_match_id,
+      :game_datetime,
+      :game_duration_seconds,
+      :queue_type
+    ])
+  end
+
   defp summarize_positions(participants) do
     participants
     |> Enum.reject(&is_nil(&1.position))
@@ -1029,7 +1064,7 @@ defmodule Receipts.LoL.Queries do
           |> apply_position_filter(positions)
           |> Ash.Query.sort(game_datetime: :desc)
           |> Ash.Query.limit(20)
-          |> Ash.Query.load(:match)
+          |> Ash.Query.load(match: match_summary_query())
           |> Ash.read!()
       end
 
