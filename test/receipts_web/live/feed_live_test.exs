@@ -42,6 +42,7 @@ defmodule ReceiptsWeb.FeedLiveTest do
     assert has_element?(view, "#recent-game-#{shared_match.id}", "2 players together")
     assert has_element?(view, "#recent-game-#{shared_match.id}", "Ranked Solo/Duo")
     assert has_element?(view, "#recent-game-#{shared_match.id}", "30:00")
+    refute has_element?(view, "#recent-game-#{shared_match.id}", shared_match.riot_match_id)
 
     assert has_element?(
              view,
@@ -51,8 +52,19 @@ defmodule ReceiptsWeb.FeedLiveTest do
 
     assert has_element?(
              view,
-             "#recent-game-#{shared_match.id}-player-#{player_a.id}",
+             "#recent-game-#{shared_match.id}-player-#{player_a.id}[aria-label='Koozie Win']"
+           )
+
+    assert has_element?(
+             view,
+             "#recent-game-#{shared_match.id}-player-#{player_a.id} .text-success",
              "6/2/9"
+           )
+
+    assert has_element?(
+             view,
+             "#recent-game-#{shared_match.id}-player-#{player_a.id}",
+             "7.50 KDA"
            )
 
     assert has_element?(
@@ -69,8 +81,7 @@ defmodule ReceiptsWeb.FeedLiveTest do
 
     assert has_element?(
              view,
-             "#recent-game-#{shared_match.id}-player-#{player_b.id}",
-             "Loss"
+             "#recent-game-#{shared_match.id}-player-#{player_b.id}[aria-label='Kupo Loss']"
            )
   end
 
@@ -93,6 +104,8 @@ defmodule ReceiptsWeb.FeedLiveTest do
     {:ok, view, _html} = live(conn, ~p"/feed")
 
     assert has_element?(view, "#recent-game-#{ranked_match.id}")
+    assert has_element?(view, "#recent-game-#{ranked_match.id}.bg-success\\/5")
+    assert has_element?(view, "#recent-game-#{ranked_match.id}-summary.bg-success\\/10")
     refute has_element?(view, "#recent-game-#{normal_match.id}")
     refute has_element?(view, "#recent-games-feed", "Normal Draft")
   end
