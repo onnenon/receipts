@@ -241,9 +241,8 @@ defmodule ReceiptsWeb.PlayerLive do
 
     {:noreply,
      socket
-     |> assign(:run_it_down_positions, positions)
-     |> reset_run_it_down_analysis()
-     |> load_run_it_down_analysis_cache()}
+     |> assign_position_filters(positions)
+     |> maybe_rerun()}
   end
 
   @impl true
@@ -288,12 +287,12 @@ defmodule ReceiptsWeb.PlayerLive do
         do: MapSet.delete(socket.assigns.enabled_positions, position),
         else: MapSet.put(socket.assigns.enabled_positions, position)
 
-    {:noreply, socket |> assign(:enabled_positions, enabled) |> maybe_rerun()}
+    {:noreply, socket |> assign_position_filters(enabled) |> maybe_rerun()}
   end
 
   @impl true
   def handle_event("clear_positions", _, socket) do
-    {:noreply, socket |> assign(:enabled_positions, MapSet.new()) |> maybe_rerun()}
+    {:noreply, socket |> assign_position_filters(MapSet.new()) |> maybe_rerun()}
   end
 
   @impl true
@@ -860,6 +859,16 @@ defmodule ReceiptsWeb.PlayerLive do
       from_year: from_year,
       to_year: to_year
     ]
+  end
+
+  defp assign_position_filters(%{assigns: %{comparison?: true}} = socket, positions) do
+    assign(socket, :enabled_positions, positions)
+  end
+
+  defp assign_position_filters(socket, positions) do
+    socket
+    |> assign(:enabled_positions, positions)
+    |> assign(:run_it_down_positions, positions)
   end
 
   defp maybe_rerun(socket) do

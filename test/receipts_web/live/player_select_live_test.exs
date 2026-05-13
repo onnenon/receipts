@@ -191,6 +191,48 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     assert run_it_down_analysis_count(player.id, "Ahri", ["JUNGLE", "TOP"]) == 1
   end
 
+  test "single player position filters stay connected to run it down analysis", %{conn: conn} do
+    player = create_player("Koozie")
+    ahri = create_champion("Ahri", 103)
+
+    create_run_it_down_analysis(
+      player.id,
+      ahri,
+      "MIDDLE",
+      DateTime.utc_now(),
+      "Cached mid read follows the page filter."
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/players/#{player.id}?champion=Ahri")
+
+    assert has_element?(view, "#run-it-down-needs-position")
+
+    view
+    |> element("#position-toggle-MIDDLE")
+    |> render_click()
+
+    assert has_element?(view, "#position-toggle-MIDDLE.bg-sky-500")
+    assert has_element?(view, "#run-it-down-position-MIDDLE.bg-sky-500")
+    assert has_element?(view, "#run-it-down-analysis-cache-date", "Cached analysis generated")
+    assert has_element?(view, "#run-it-down-analysis-result", "Cached mid read follows")
+
+    view
+    |> element("#run-it-down-position-TOP")
+    |> render_click()
+
+    assert has_element?(view, "#position-toggle-TOP.bg-amber-500")
+    assert has_element?(view, "#run-it-down-position-TOP.bg-amber-500")
+    refute has_element?(view, "#run-it-down-analysis-cache-date", "Cached analysis generated")
+
+    view
+    |> element("#clear-positions")
+    |> render_click()
+
+    assert has_element?(view, "#run-it-down-needs-position")
+    refute has_element?(view, "#run-it-down-position-MIDDLE.bg-sky-500")
+    refute has_element?(view, "#run-it-down-position-TOP.bg-amber-500")
+  end
+
   test "single player run it down analysis is admin only but cached reads are visible", %{
     conn: conn
   } do
