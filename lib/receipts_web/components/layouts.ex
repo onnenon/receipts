@@ -51,6 +51,12 @@ defmodule ReceiptsWeb.Layouts do
         </a>
         <nav class="flex items-center gap-2 overflow-x-auto">
           <.link
+            href={~p"/feed"}
+            class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
+          >
+            Feed
+          </.link>
+          <.link
             href={~p"/players"}
             class="rounded-lg px-3 py-2 text-sm font-medium text-base-content/65 transition hover:bg-base-200 hover:text-base-content"
           >

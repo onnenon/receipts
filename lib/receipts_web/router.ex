@@ -27,6 +27,7 @@ defmodule ReceiptsWeb.Router do
     post("/admin/login", AdminSessionController, :create)
 
     live_session :default, on_mount: {ReceiptsWeb.AdminAuth, :assign_admin_authenticated} do
+      live("/feed", FeedLive, :index)
       live("/players", PlayerSelectLive, :index)
       live("/players/compare", PlayerLive, :show)
       live("/players/:id", PlayerLive, :show)

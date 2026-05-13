@@ -170,6 +170,90 @@ defmodule Receipts.LoL.Queries do
     end)
   end
 
+  def recent_games(opts \\ []) do
+    limit = Keyword.get(opts, :limit, 20)
+    queue_types = Keyword.get(opts, :queue_types, ~w(ranked_solo ranked_flex))
+
+    recent_match_ids =
+      MatchParticipant
+      |> join(:inner, [participant], match in Match, on: match.id == participant.match_id)
+      |> where([_participant, match], match.queue_type in ^queue_types)
+      |> group_by([participant, _match], participant.match_id)
+      |> select([participant, match], %{
+        match_id: participant.match_id,
+        game_datetime: max(match.game_datetime)
+      })
+      |> order_by([_participant, match], desc: max(match.game_datetime))
+      |> limit(^limit)
+      |> Repo.all()
+
+    match_ids = Enum.map(recent_match_ids, & &1.match_id)
+    match_order = Map.new(Enum.with_index(match_ids))
+
+    if match_ids == [] do
+      []
+    else
+      participants =
+        MatchParticipant
+        |> join(:inner, [participant], account in Account,
+          on: account.id == participant.account_id
+        )
+        |> join(:inner, [_participant, account], player in Player,
+          on: player.id == account.player_id
+        )
+        |> join(:inner, [participant, _account, _player], champion in Champion,
+          on: champion.id == participant.champion_id
+        )
+        |> join(:inner, [participant, _account, _player, _champion], match in Match,
+          on: match.id == participant.match_id
+        )
+        |> where([participant], participant.match_id in ^match_ids)
+        |> where(
+          [_participant, _account, _player, _champion, match],
+          match.queue_type in ^queue_types
+        )
+        |> order_by([_participant, _account, player, _champion, match],
+          desc: match.game_datetime,
+          asc: player.name
+        )
+        |> select([participant, account, player, champion, match], %{
+          id: participant.id,
+          match_id: participant.match_id,
+          player: player,
+          account: account,
+          champion: champion,
+          match: match,
+          kills: participant.kills,
+          deaths: participant.deaths,
+          assists: participant.assists,
+          win: participant.win,
+          cs: participant.cs,
+          damage_dealt: participant.damage_dealt,
+          vision_score: participant.vision_score,
+          position: participant.position
+        })
+        |> Repo.all()
+
+      participants
+      |> Enum.group_by(& &1.match_id)
+      |> Enum.map(fn {match_id, parts} ->
+        match = parts |> List.first() |> Map.fetch!(:match)
+
+        %{
+          id: match_id,
+          match: match,
+          participants: Enum.sort_by(parts, & &1.player.name),
+          known_player_count:
+            parts
+            |> Enum.map(& &1.player.id)
+            |> Enum.uniq()
+            |> length()
+        }
+      end)
+      |> Enum.sort_by(&Map.fetch!(match_order, &1.id))
+    end
+  end
+
   defp player_home_totals([]), do: %{}
 
   defp player_home_totals(player_ids) do

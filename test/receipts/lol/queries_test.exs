@@ -4,6 +4,79 @@ defmodule Receipts.LoL.QueriesTest do
   alias Receipts.LoL.{Account, Champion, Match, MatchParticipant, Player}
   alias Receipts.LoL.Queries
 
+  test "recent_games returns latest distinct matches grouped with all known players" do
+    player_a = create_player("Koozie")
+    player_b = create_player("Kupo")
+
+    account_a = create_account(player_a, "A")
+    account_b = create_account(player_b, "B")
+
+    ahri = create_champion("Ahri", 103)
+    lulu = create_champion("Lulu", 117)
+
+    old_match = create_match("old-feed", ~U[2026-05-10 12:00:00Z])
+    shared_match = create_match("shared-feed", ~U[2026-05-10 13:00:00Z])
+
+    create_participant(account_a, old_match, ahri, true, kills: 20)
+    create_participant(account_a, shared_match, ahri, true, kills: 6)
+    create_participant(account_b, shared_match, lulu, false, kills: 2)
+
+    assert [game] = Queries.recent_games(limit: 1)
+    assert game.id == shared_match.id
+    assert game.known_player_count == 2
+    assert Enum.map(game.participants, & &1.player.name) == ["Koozie", "Kupo"]
+    assert Enum.map(game.participants, & &1.champion.name) == ["Ahri", "Lulu"]
+  end
+
+  test "recent_games caps the feed at twenty matches" do
+    player = create_player("Koozie")
+    account = create_account(player, "A")
+    ahri = create_champion("Ahri", 103)
+
+    for n <- 1..21 do
+      match = create_match("feed-#{n}", DateTime.add(~U[2026-05-10 00:00:00Z], n * 3600))
+      create_participant(account, match, ahri, true, kills: n)
+    end
+
+    games = Queries.recent_games()
+
+    assert length(games) == 20
+
+    assert List.first(games).match.game_datetime |> DateTime.truncate(:second) ==
+             ~U[2026-05-10 21:00:00Z]
+
+    assert List.last(games).match.game_datetime |> DateTime.truncate(:second) ==
+             ~U[2026-05-10 02:00:00Z]
+  end
+
+  test "recent_games defaults to ranked solo and ranked flex only" do
+    player = create_player("Koozie")
+    account = create_account(player, "A")
+    ahri = create_champion("Ahri", 103)
+
+    ranked_solo = create_match("ranked-solo-feed", ~U[2026-05-10 12:00:00Z])
+
+    ranked_flex =
+      create_match("ranked-flex-feed", ~U[2026-05-10 13:00:00Z],
+        queue_id: 440,
+        queue_type: "ranked_flex"
+      )
+
+    normal =
+      create_match("normal-feed", ~U[2026-05-10 14:00:00Z],
+        queue_id: 400,
+        queue_type: "normal_draft"
+      )
+
+    create_participant(account, ranked_solo, ahri, true, kills: 6)
+    create_participant(account, ranked_flex, ahri, true, kills: 7)
+    create_participant(account, normal, ahri, true, kills: 20)
+
+    match_ids = Queries.recent_games() |> Enum.map(& &1.id)
+
+    assert match_ids == [ranked_flex.id, ranked_solo.id]
+  end
+
   test "multi-player receipts only include games containing every selected player" do
     player_a = create_player("Koozie")
     player_b = create_player("Kupo")
@@ -108,14 +181,14 @@ defmodule Receipts.LoL.QueriesTest do
     |> Ash.create!()
   end
 
-  defp create_match(id, game_datetime) do
+  defp create_match(id, game_datetime, opts \\ []) do
     Match
     |> Ash.Changeset.for_create(:create, %{
       riot_match_id: "NA1_#{id}_#{unique_id()}",
       game_datetime: game_datetime,
       game_duration_seconds: 1800,
-      queue_id: 420,
-      queue_type: "ranked_solo",
+      queue_id: Keyword.get(opts, :queue_id, 420),
+      queue_type: Keyword.get(opts, :queue_type, "ranked_solo"),
       raw_info: %{}
     })
     |> Ash.create!()
