@@ -1806,47 +1806,108 @@ defmodule ReceiptsWeb.PlayerLive do
                 <div
                   id="run-it-down-selected-champion"
                   class={[
-                    "flex flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
-                    if(@selected_champion,
-                      do: "border-primary/30 bg-primary/10",
-                      else: "border-base-300 bg-base-100/50"
-                    )
+                    "relative overflow-hidden rounded-xl border",
+                    cond do
+                      @selected_champion && MapSet.size(@run_it_down_positions) > 0 ->
+                        "border-primary/35 bg-black text-white shadow-lg"
+
+                      @selected_champion ->
+                        "border-primary/30 bg-primary/10 px-4 py-3"
+
+                      true ->
+                        "border-base-300 bg-base-100/50 px-4 py-3"
+                    end
                   ]}
                 >
-                  <div class="min-w-0">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">
-                      Locked In
-                    </p>
-                    <div class="mt-1 flex flex-wrap items-center gap-2">
-                      <span class="text-lg font-black tracking-tight">
-                        {if @selected_champion, do: @selected_champion.name, else: "No champion selected"}
-                      </span>
-                      <%= for label <- selected_position_labels(@run_it_down_positions) do %>
-                        <span class="rounded-md border border-primary/25 bg-base-100/70 px-2 py-0.5 text-xs font-bold text-primary">
-                          {label}
-                        </span>
-                      <% end %>
-                      <button
-                        :if={@selected_champion}
-                        id="clear-run-it-down-champion"
-                        type="button"
-                        phx-click="clear_run_it_down_champion"
-                        aria-label="Clear selected champion"
-                        class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-primary/25 bg-base-100/70 text-primary transition hover:border-primary/50 hover:bg-base-100"
-                      >
-                        <.icon name="hero-x-mark-mini" class="h-4 w-4" />
-                      </button>
+                  <%= if @selected_champion && MapSet.size(@run_it_down_positions) > 0 do %>
+                    <img
+                      src={champion_splash_url(@selected_champion)}
+                      alt=""
+                      class="absolute inset-0 h-full w-full scale-110 object-cover object-center opacity-60 blur-sm"
+                      onerror="this.style.display='none'"
+                    />
+                    <div class="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-black/45">
                     </div>
-                  </div>
-                  <div class="text-xs leading-5 text-base-content/45 sm:max-w-sm sm:text-right">
-                    <%= cond do %>
-                      <% is_nil(@selected_champion) -> %>
-                        Search below or choose from the champion list to set the target.
-                      <% MapSet.size(@run_it_down_positions) == 0 -> %>
-                        Pick the role they are threatening to play.
-                      <% true -> %>
-                        Current read is scoped to this champion, position, and active filters.
-                    <% end %>
+                    <div class="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 to-transparent">
+                    </div>
+                  <% end %>
+
+                  <div class={[
+                    "relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
+                    if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                      do: "min-h-32 px-5 py-5",
+                      else: ""
+                    )
+                  ]}>
+                    <div class="min-w-0">
+                      <p class={[
+                        "text-xs font-semibold uppercase tracking-wide",
+                        if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                          do: "text-white/60",
+                          else: "text-base-content/45"
+                        )
+                      ]}>
+                        Locked In
+                      </p>
+                      <div class="mt-1 flex flex-wrap items-center gap-2">
+                        <span class={[
+                          "font-black tracking-tight",
+                          if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                            do: "text-3xl text-white drop-shadow",
+                            else: "text-lg"
+                          )
+                        ]}>
+                          {if @selected_champion,
+                            do: @selected_champion.name,
+                            else: "No champion selected"}
+                        </span>
+                        <%= for label <- selected_position_labels(@run_it_down_positions) do %>
+                          <span class={[
+                            "rounded-md border px-2 py-0.5 text-xs font-bold",
+                            if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                              do: "border-primary/40 bg-primary/90 text-primary-content shadow-sm",
+                              else: "border-primary/25 bg-base-100/70 text-primary"
+                            )
+                          ]}>
+                            {label}
+                          </span>
+                        <% end %>
+                        <button
+                          :if={@selected_champion}
+                          id="clear-run-it-down-champion"
+                          type="button"
+                          phx-click="clear_run_it_down_champion"
+                          aria-label="Clear selected champion"
+                          class={[
+                            "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
+                            if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                              do:
+                                "border-white/20 bg-black/35 text-white hover:border-white/40 hover:bg-black/55",
+                              else:
+                                "border-primary/25 bg-base-100/70 text-primary hover:border-primary/50 hover:bg-base-100"
+                            )
+                          ]}
+                        >
+                          <.icon name="hero-x-mark-mini" class="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div class={[
+                      "text-xs leading-5 sm:max-w-sm sm:text-right",
+                      if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                        do: "text-white/65",
+                        else: "text-base-content/45"
+                      )
+                    ]}>
+                      <%= cond do %>
+                        <% is_nil(@selected_champion) -> %>
+                          Search below or choose from the champion list to set the target.
+                        <% MapSet.size(@run_it_down_positions) == 0 -> %>
+                          Pick the role they are threatening to play.
+                        <% true -> %>
+                          Current read is scoped to this champion, position, and active filters.
+                      <% end %>
+                    </div>
                   </div>
                 </div>
 

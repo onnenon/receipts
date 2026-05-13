@@ -3,7 +3,7 @@ defmodule Receipts.AIClientStub do
 
   def generate_structured(prompt, _schema, _opts \\ []) do
     cond do
-      String.contains?(prompt, "Will he run it down") ->
+      prompt |> String.downcase() |> String.contains?("run it down") ->
         {:ok,
          %{
            "verdict" => "Probably not a felony, but keep wards nearby.",
