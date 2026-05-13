@@ -8,6 +8,8 @@ defmodule Receipts.LoL.Queries do
   alias Receipts.LoL.{Account, Champion, Match, MatchParticipant, Player, Queue}
   alias Receipts.Repo
 
+  @positions ~w(TOP JUNGLE MIDDLE BOTTOM UTILITY)
+
   @doc """
   Returns `{:ok, stats}` or `{:error, :champion_not_found}`.
 
@@ -736,6 +738,96 @@ defmodule Receipts.LoL.Queries do
     end
   end
 
+  def run_it_down_analysis_context(player_id, champion_key, positions, opts \\ []) do
+    queue_types = Keyword.get(opts, :queue_types, Queue.default_queues())
+    from_year = Keyword.get(opts, :from_year)
+    to_year = Keyword.get(opts, :to_year)
+    positions = normalize_positions(positions)
+
+    with %Player{} = player <- load_players_in_order([player_id]) |> List.first(),
+         %Champion{} = champion <- find_champion(champion_key),
+         true <- positions != [] and Enum.all?(positions, &(&1 in @positions)) do
+      all_participants =
+        player_participants(player.id,
+          queue_types: queue_types,
+          from_year: from_year,
+          to_year: to_year,
+          load: [:champion, match: match_summary_query()]
+        )
+
+      exact_champion =
+        Enum.filter(all_participants, &(&1.champion_id == champion.id))
+
+      exact_champion_positions =
+        Enum.filter(exact_champion, &(&1.position in positions))
+
+      same_positions =
+        Enum.filter(all_participants, &(&1.position in positions))
+
+      recent_overall =
+        all_participants
+        |> Enum.sort_by(& &1.game_datetime, {:desc, DateTime})
+        |> Enum.take(12)
+
+      {:ok,
+       %{
+         filters: %{
+           queues: queue_types,
+           from_year: from_year,
+           to_year: to_year
+         },
+         selected_player: %{
+           id: player.id,
+           name: player.name,
+           accounts: Enum.map(player.accounts, &account_context/1)
+         },
+         selected_champion: %{
+           id: champion.id,
+           key: champion.key,
+           name: champion.name,
+           riot_id: champion.riot_id
+         },
+         selected_positions:
+           Enum.map(positions, fn position ->
+             %{key: position, label: position_label(position)}
+           end),
+         exact_champion_selected_positions_summary: performance_summary(exact_champion_positions),
+         exact_champion_all_positions_summary: performance_summary(exact_champion),
+         same_positions_summary: performance_summary(same_positions),
+         same_positions_top_champions:
+           same_positions
+           |> summarize_champion_participants()
+           |> Enum.reject(&(&1.champion.id == champion.id))
+           |> serialize_champion_summaries(8),
+         overall_top_champions:
+           all_participants
+           |> summarize_champion_participants()
+           |> serialize_champion_summaries(10),
+         recent_exact_champion_selected_position_games:
+           exact_champion_positions
+           |> Enum.sort_by(& &1.game_datetime, {:desc, DateTime})
+           |> Enum.take(12)
+           |> Enum.map(&participant_context(&1, player)),
+         recent_same_position_games:
+           same_positions
+           |> Enum.sort_by(& &1.game_datetime, {:desc, DateTime})
+           |> Enum.take(12)
+           |> Enum.map(&participant_context(&1, player)),
+         recent_overall_games: Enum.map(recent_overall, &participant_context(&1, player)),
+         notes: [
+           "The exact champion/selected-position sample may be zero games; if so, use same-position and overall champion history as weaker evidence.",
+           "same_positions_top_champions are the closest available similar-champion proxy in this dataset.",
+           "Do not invent champion mastery, mechanics, or results that are not in the supplied JSON.",
+           "Small samples should lower confidence."
+         ]
+       }}
+    else
+      nil -> {:error, :not_found}
+      false -> {:error, :position_required}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp load_players_in_order(player_ids) do
     players =
       Player
@@ -967,6 +1059,28 @@ defmodule Receipts.LoL.Queries do
     do: String.capitalize(String.downcase(position))
 
   defp position_label(_), do: "Unknown"
+
+  defp normalize_positions(positions) when is_list(positions) do
+    positions
+    |> Enum.map(&normalize_position/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp normalize_positions(position), do: normalize_positions([position])
+
+  defp normalize_position(position) when is_binary(position) do
+    position
+    |> String.trim()
+    |> String.upcase()
+    |> then(fn
+      "" -> nil
+      normalized -> normalized
+    end)
+  end
+
+  defp normalize_position(_position), do: nil
 
   defp find_champion(name) do
     Ash.read!(Champion)

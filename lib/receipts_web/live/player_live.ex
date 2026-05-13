@@ -4,7 +4,7 @@ defmodule ReceiptsWeb.PlayerLive do
   require Ash.Query
   require Logger
 
-  alias Receipts.AI.{CompSuggestion, WinLossAnalysis}
+  alias Receipts.AI.{CompSuggestion, RunItDownAnalysis, WinLossAnalysis}
   alias Receipts.LoL.{Player, Champion, Queue}
   alias Receipts.LoL.Queries
 
@@ -116,9 +116,21 @@ defmodule ReceiptsWeb.PlayerLive do
          |> assign(:win_loss_analysis_open, true)
          |> assign(:win_loss_analysis_error, nil)
          |> assign(:win_loss_analysis_loading, false)
+         |> assign(:run_it_down_positions, MapSet.new())
+         |> assign(:run_it_down_champion_filter, "")
+         |> assign(:run_it_down_analysis, nil)
+         |> assign(:run_it_down_analysis_record_id, nil)
+         |> assign(:run_it_down_analysis_generated_at, nil)
+         |> assign(:run_it_down_analysis_cached, false)
+         |> assign(:run_it_down_analysis_history, [])
+         |> assign(:run_it_down_analysis_history_open, false)
+         |> assign(:run_it_down_analysis_open, true)
+         |> assign(:run_it_down_analysis_error, nil)
+         |> assign(:run_it_down_analysis_loading, false)
          |> assign(:recent_queue_filter, nil)
          |> load_comp_suggestion_cache()
-         |> load_win_loss_analysis_cache()}
+         |> load_win_loss_analysis_cache()
+         |> load_run_it_down_analysis_cache()}
     end
   end
 
@@ -132,8 +144,10 @@ defmodule ReceiptsWeb.PlayerLive do
           {:noreply,
            socket
            |> assign(:selected_champion, nil)
+           |> assign(:run_it_down_champion_filter, "")
            |> assign(:result, nil)
-           |> assign(:results, [])}
+           |> assign(:results, [])
+           |> reset_run_it_down_analysis()}
 
         champion_key ->
           case find_champion(socket.assigns.all_champions, champion_key) do
@@ -144,6 +158,9 @@ defmodule ReceiptsWeb.PlayerLive do
               socket =
                 socket
                 |> assign(:selected_champion, champion)
+                |> assign(:run_it_down_champion_filter, "")
+                |> reset_run_it_down_analysis()
+                |> load_run_it_down_analysis_cache()
 
               {:noreply, run_query(socket)}
           end
@@ -182,6 +199,51 @@ defmodule ReceiptsWeb.PlayerLive do
   @impl true
   def handle_event("filter_champions", %{"champion" => query}, socket) do
     {:noreply, assign(socket, :champion_filter, query)}
+  end
+
+  @impl true
+  def handle_event("filter_run_it_down_champions", %{"champion" => query}, socket) do
+    {:noreply, assign(socket, :run_it_down_champion_filter, query)}
+  end
+
+  @impl true
+  def handle_event("select_run_it_down_champion_from_search", %{"champion" => query}, socket) do
+    case find_champion(socket.assigns.all_champions, query) do
+      nil ->
+        {:noreply,
+         assign(
+           socket,
+           :run_it_down_analysis_error,
+           "Champion not found. Try the full champion name."
+         )}
+
+      champion ->
+        {:noreply, push_patch(socket, to: player_path(socket.assigns, champion.key))}
+    end
+  end
+
+  @impl true
+  def handle_event("select_run_it_down_champion", %{"key" => champion_key}, socket) do
+    {:noreply, push_patch(socket, to: player_path(socket.assigns, champion_key))}
+  end
+
+  @impl true
+  def handle_event("clear_run_it_down_champion", _params, socket) do
+    {:noreply, push_patch(socket, to: player_path(socket.assigns, nil))}
+  end
+
+  @impl true
+  def handle_event("toggle_run_it_down_position", %{"position" => position}, socket) do
+    positions =
+      if MapSet.member?(socket.assigns.run_it_down_positions, position),
+        do: MapSet.delete(socket.assigns.run_it_down_positions, position),
+        else: MapSet.put(socket.assigns.run_it_down_positions, position)
+
+    {:noreply,
+     socket
+     |> assign(:run_it_down_positions, positions)
+     |> reset_run_it_down_analysis()
+     |> load_run_it_down_analysis_cache()}
   end
 
   @impl true
@@ -360,6 +422,68 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   @impl true
+  def handle_event(
+        "analyze_run_it_down",
+        _params,
+        %{
+          assigns: %{
+            admin_authenticated: true,
+            comparison?: false,
+            selected_champion: %{key: champion_key},
+            run_it_down_positions: positions
+          }
+        } = socket
+      )
+      when is_struct(positions, MapSet) do
+    selected_positions = MapSet.to_list(positions)
+
+    %{
+      player: player,
+      enabled_queues: enabled_queues,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    if selected_positions == [] do
+      {:noreply, assign(socket, :run_it_down_analysis_error, "Select at least one position.")}
+    else
+      opts = [
+        queue_types: MapSet.to_list(enabled_queues),
+        from_year: from_year,
+        to_year: to_year,
+        force: true
+      ]
+
+      {:noreply,
+       socket
+       |> assign(:run_it_down_analysis_error, nil)
+       |> assign(:run_it_down_analysis_loading, true)
+       |> start_async(:run_it_down_analysis, fn ->
+         RunItDownAnalysis.fetch_or_generate(player.id, champion_key, selected_positions, opts)
+       end)}
+    end
+  end
+
+  def handle_event(
+        "analyze_run_it_down",
+        _params,
+        %{assigns: %{admin_authenticated: true}} = socket
+      ) do
+    {:noreply,
+     assign(socket, :run_it_down_analysis_error, "Select a champion and position first.")}
+  end
+
+  def handle_event("analyze_run_it_down", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Run-it-down analysis is admin-only.")}
+  end
+
+  @impl true
+  def handle_event("toggle_run_it_down_analysis", _params, socket) do
+    {:noreply,
+     assign(socket, :run_it_down_analysis_open, !socket.assigns.run_it_down_analysis_open)}
+  end
+
+  @impl true
   def handle_event("toggle_comp_suggestion_history", _params, socket) do
     {:noreply,
      assign(
@@ -404,6 +528,30 @@ defmodule ReceiptsWeb.PlayerLive do
          socket
          |> assign_win_loss_analysis(analysis)
          |> assign(:win_loss_analysis_error, nil)}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_run_it_down_analysis_history", _params, socket) do
+    {:noreply,
+     assign(
+       socket,
+       :run_it_down_analysis_history_open,
+       !socket.assigns.run_it_down_analysis_history_open
+     )}
+  end
+
+  @impl true
+  def handle_event("view_run_it_down_analysis", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.run_it_down_analysis_history, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      analysis ->
+        {:noreply,
+         socket
+         |> assign_run_it_down_analysis(analysis)
+         |> assign(:run_it_down_analysis_error, nil)}
     end
   end
 
@@ -463,6 +611,34 @@ defmodule ReceiptsWeb.PlayerLive do
      |> assign(:win_loss_analysis_loading, false)}
   end
 
+  @impl true
+  def handle_async(:run_it_down_analysis, {:ok, {:ok, analysis}}, socket) do
+    {:noreply,
+     socket
+     |> assign_run_it_down_analysis(analysis)
+     |> refresh_run_it_down_analysis_history()
+     |> assign(:run_it_down_analysis_error, nil)
+     |> assign(:run_it_down_analysis_loading, false)}
+  end
+
+  def handle_async(:run_it_down_analysis, {:ok, {:error, reason}}, socket) do
+    Logger.error("Run-it-down analysis failed: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:run_it_down_analysis_error, run_it_down_analysis_error(reason))
+     |> assign(:run_it_down_analysis_loading, false)}
+  end
+
+  def handle_async(:run_it_down_analysis, {:exit, reason}, socket) do
+    Logger.error("Run-it-down analysis task exited: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:run_it_down_analysis_error, run_it_down_analysis_error(:unknown))
+     |> assign(:run_it_down_analysis_loading, false)}
+  end
+
   defp comp_suggestion_error(:missing_api_key),
     do: "GEMINI_API_KEY is not configured for this environment."
 
@@ -482,6 +658,20 @@ defmodule ReceiptsWeb.PlayerLive do
     do: "Gemini timed out while generating the win/loss analysis. Try again in a moment."
 
   defp win_loss_analysis_error(_reason), do: "Win/loss analysis failed. Try again in a moment."
+
+  defp run_it_down_analysis_error(:missing_api_key),
+    do: "GEMINI_API_KEY is not configured for this environment."
+
+  defp run_it_down_analysis_error(:position_required), do: "Select a position for the read."
+
+  defp run_it_down_analysis_error(:champion_not_found), do: "Champion not found."
+  defp run_it_down_analysis_error(:not_found), do: "Player or champion not found."
+
+  defp run_it_down_analysis_error(%Req.TransportError{reason: :timeout}),
+    do: "Gemini timed out while judging the lock-in. Try again in a moment."
+
+  defp run_it_down_analysis_error(_reason),
+    do: "Run-it-down analysis failed. Try again in a moment."
 
   defp load_comp_suggestion_cache(socket) do
     if socket.assigns.comparison? do
@@ -533,6 +723,53 @@ defmodule ReceiptsWeb.PlayerLive do
     end
   end
 
+  defp load_run_it_down_analysis_cache(socket) do
+    if run_it_down_cacheable?(socket.assigns) do
+      history =
+        RunItDownAnalysis.history(
+          socket.assigns.player.id,
+          socket.assigns.selected_champion.key,
+          MapSet.to_list(socket.assigns.run_it_down_positions),
+          run_it_down_analysis_opts(socket)
+        )
+
+      fresh = Enum.find(history, & &1.fresh?)
+
+      socket
+      |> assign(:run_it_down_analysis_history, history)
+      |> assign_run_it_down_analysis(fresh)
+    else
+      socket
+    end
+  end
+
+  defp refresh_run_it_down_analysis_history(socket) do
+    if run_it_down_cacheable?(socket.assigns) do
+      assign(
+        socket,
+        :run_it_down_analysis_history,
+        RunItDownAnalysis.history(
+          socket.assigns.player.id,
+          socket.assigns.selected_champion.key,
+          MapSet.to_list(socket.assigns.run_it_down_positions),
+          run_it_down_analysis_opts(socket)
+        )
+      )
+    else
+      socket
+    end
+  end
+
+  defp run_it_down_cacheable?(%{
+         comparison?: false,
+         selected_champion: %{key: _key},
+         run_it_down_positions: positions
+       })
+       when is_struct(positions, MapSet),
+       do: MapSet.size(positions) > 0
+
+  defp run_it_down_cacheable?(_assigns), do: false
+
   defp assign_comp_suggestion(socket, nil) do
     socket
     |> assign(:comp_suggestion, nil)
@@ -565,6 +802,34 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:win_loss_analysis_cached, analysis.cached?)
   end
 
+  defp reset_run_it_down_analysis(socket) do
+    socket
+    |> assign(:run_it_down_analysis, nil)
+    |> assign(:run_it_down_analysis_record_id, nil)
+    |> assign(:run_it_down_analysis_generated_at, nil)
+    |> assign(:run_it_down_analysis_cached, false)
+    |> assign(:run_it_down_analysis_history, [])
+    |> assign(:run_it_down_analysis_history_open, false)
+    |> assign(:run_it_down_analysis_error, nil)
+    |> assign(:run_it_down_analysis_loading, false)
+  end
+
+  defp assign_run_it_down_analysis(socket, nil) do
+    socket
+    |> assign(:run_it_down_analysis, nil)
+    |> assign(:run_it_down_analysis_record_id, nil)
+    |> assign(:run_it_down_analysis_generated_at, nil)
+    |> assign(:run_it_down_analysis_cached, false)
+  end
+
+  defp assign_run_it_down_analysis(socket, analysis) do
+    socket
+    |> assign(:run_it_down_analysis, analysis.analysis)
+    |> assign(:run_it_down_analysis_record_id, analysis.id)
+    |> assign(:run_it_down_analysis_generated_at, analysis.generated_at)
+    |> assign(:run_it_down_analysis_cached, analysis.cached?)
+  end
+
   defp comp_suggestion_opts(socket) do
     %{
       shared_match_ids: shared_match_ids,
@@ -582,6 +847,20 @@ defmodule ReceiptsWeb.PlayerLive do
   end
 
   defp win_loss_analysis_opts(socket), do: comp_suggestion_opts(socket)
+
+  defp run_it_down_analysis_opts(socket) do
+    %{
+      enabled_queues: enabled_queues,
+      from_year: from_year,
+      to_year: to_year
+    } = socket.assigns
+
+    [
+      queue_types: MapSet.to_list(enabled_queues),
+      from_year: from_year,
+      to_year: to_year
+    ]
+  end
 
   defp maybe_rerun(socket) do
     socket = refresh_top_champions(socket)
@@ -689,6 +968,8 @@ defmodule ReceiptsWeb.PlayerLive do
     |> assign(:win_loss_analysis_loading, false)
     |> assign(:win_loss_analysis_history_open, false)
     |> load_win_loss_analysis_cache()
+    |> reset_run_it_down_analysis()
+    |> load_run_it_down_analysis_cache()
   end
 
   defp run_query(socket) do
@@ -801,6 +1082,8 @@ defmodule ReceiptsWeb.PlayerLive do
     ~p"/players/compare?ids=#{Enum.join(player_ids, ",")}&champion=#{champion_key}"
   end
 
+  defp player_path(%{player: player}, nil), do: ~p"/players/#{player.id}"
+
   defp player_path(%{player: player}, champion_key),
     do: ~p"/players/#{player.id}?champion=#{champion_key}"
 
@@ -895,6 +1178,19 @@ defmodule ReceiptsWeb.PlayerLive do
     Enum.filter(champions, &String.contains?(String.downcase(&1.champion.name), normalized))
   end
 
+  defp filter_all_champions_by_name(_champions, ""), do: []
+
+  defp filter_all_champions_by_name(champions, query) do
+    normalized = String.downcase(query)
+
+    champions
+    |> Enum.filter(fn champion ->
+      String.contains?(String.downcase(champion.name), normalized) ||
+        String.contains?(String.downcase(champion.key), normalized)
+    end)
+    |> Enum.take(6)
+  end
+
   defp apply_sort_and_limit(top_champions, sort_by, limit, min_games) do
     filtered =
       case {sort_by, min_games} do
@@ -977,6 +1273,21 @@ defmodule ReceiptsWeb.PlayerLive do
   defp position_filter_active_class("BOTTOM"), do: "bg-rose-500 text-white border-rose-500"
   defp position_filter_active_class("UTILITY"), do: "bg-violet-500 text-white border-violet-500"
   defp position_filter_active_class(_), do: "bg-primary text-primary-content border-primary"
+
+  defp run_it_down_position_button_class(selected_positions, position) do
+    if MapSet.member?(selected_positions, position) do
+      position_filter_active_class(position)
+    else
+      "border-base-300 bg-base-100 text-base-content/55 hover:border-base-content/30 hover:text-base-content/80"
+    end
+  end
+
+  defp selected_position_labels(positions) do
+    positions
+    |> MapSet.to_list()
+    |> Enum.sort()
+    |> Enum.map(&position_label/1)
+  end
 
   defp position_card_class("TOP"), do: "border-amber-500/30 bg-amber-500/10"
   defp position_card_class("JUNGLE"), do: "border-emerald-500/30 bg-emerald-500/10"
@@ -1131,6 +1442,10 @@ defmodule ReceiptsWeb.PlayerLive do
         assigns.top_champions
         |> filter_champions_by_name(assigns.champion_filter)
         |> apply_sort_and_limit(assigns.champion_sort, assigns.champion_limit, assigns.min_games)
+      )
+      |> assign(
+        :displayed_run_it_down_champions,
+        filter_all_champions_by_name(assigns.all_champions, assigns.run_it_down_champion_filter)
       )
 
     ~H"""
@@ -1410,6 +1725,319 @@ defmodule ReceiptsWeb.PlayerLive do
             </div>
           <% end %>
         </div>
+
+        <%= if !@comparison? do %>
+          <section
+            id="run-it-down-analysis-panel"
+            class="relative z-20 overflow-visible rounded-xl border border-base-300 bg-base-200 shadow-sm"
+          >
+            <div class="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
+                  Will They Run It Down?
+                </p>
+                <p class="text-xs leading-5 text-base-content/40">
+                  Pick a champion and position, then judge the lock-in from champion history, similar champs, role form, and recent games.
+                </p>
+                <%= cond do %>
+                  <% is_nil(@selected_champion) -> %>
+                    <p id="run-it-down-needs-champion" class="mt-1 text-xs font-medium text-warning">
+                      Select a champion to unlock the read.
+                    </p>
+                  <% MapSet.size(@run_it_down_positions) == 0 -> %>
+                    <p id="run-it-down-needs-position" class="mt-1 text-xs font-medium text-warning">
+                      Select a position for {@selected_champion.name}.
+                    </p>
+                  <% @run_it_down_analysis_cached && @run_it_down_analysis_generated_at -> %>
+                    <p id="run-it-down-analysis-cache-date" class="mt-1 text-xs font-medium text-primary">
+                      Cached analysis generated {format_datetime(@run_it_down_analysis_generated_at)}.
+                    </p>
+                  <% true -> %>
+                <% end %>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-2">
+                <%= if @run_it_down_analysis_open && @admin_authenticated do %>
+                  <button
+                    id="analyze-run-it-down-button"
+                    type="button"
+                    phx-click="analyze_run_it_down"
+                    disabled={
+                      @run_it_down_analysis_loading || is_nil(@selected_champion) ||
+                        MapSet.size(@run_it_down_positions) == 0
+                    }
+                    class="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-content shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-65"
+                  >
+                    <%= if @run_it_down_analysis_loading do %>
+                      <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin" />
+                      Judging...
+                    <% else %>
+                      <.icon name="hero-fire-mini" class="h-4 w-4" />
+                      <%= if @run_it_down_analysis do %>
+                        Judge Again
+                      <% else %>
+                        Judge Lock-In
+                      <% end %>
+                    <% end %>
+                  </button>
+                <% end %>
+                <button
+                  id="toggle-run-it-down-analysis"
+                  type="button"
+                  phx-click="toggle_run_it_down_analysis"
+                  aria-expanded={@run_it_down_analysis_open}
+                  aria-controls="run-it-down-analysis-content"
+                  class="flex h-9 w-9 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content"
+                >
+                  <.icon
+                    name={
+                      if @run_it_down_analysis_open,
+                        do: "hero-chevron-up-mini",
+                        else: "hero-chevron-down-mini"
+                    }
+                    class="h-4 w-4"
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div :if={@run_it_down_analysis_open} id="run-it-down-analysis-content">
+              <div class="relative z-20 space-y-4 border-t border-base-300 px-4 py-4">
+                <div
+                  id="run-it-down-selected-champion"
+                  class={[
+                    "flex flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+                    if(@selected_champion,
+                      do: "border-primary/30 bg-primary/10",
+                      else: "border-base-300 bg-base-100/50"
+                    )
+                  ]}
+                >
+                  <div class="min-w-0">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">
+                      Locked In
+                    </p>
+                    <div class="mt-1 flex flex-wrap items-center gap-2">
+                      <span class="text-lg font-black tracking-tight">
+                        {if @selected_champion, do: @selected_champion.name, else: "No champion selected"}
+                      </span>
+                      <%= for label <- selected_position_labels(@run_it_down_positions) do %>
+                        <span class="rounded-md border border-primary/25 bg-base-100/70 px-2 py-0.5 text-xs font-bold text-primary">
+                          {label}
+                        </span>
+                      <% end %>
+                      <button
+                        :if={@selected_champion}
+                        id="clear-run-it-down-champion"
+                        type="button"
+                        phx-click="clear_run_it_down_champion"
+                        aria-label="Clear selected champion"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-primary/25 bg-base-100/70 text-primary transition hover:border-primary/50 hover:bg-base-100"
+                      >
+                        <.icon name="hero-x-mark-mini" class="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div class="text-xs leading-5 text-base-content/45 sm:max-w-sm sm:text-right">
+                    <%= cond do %>
+                      <% is_nil(@selected_champion) -> %>
+                        Search below or choose from the champion list to set the target.
+                      <% MapSet.size(@run_it_down_positions) == 0 -> %>
+                        Pick the role they are threatening to play.
+                      <% true -> %>
+                        Current read is scoped to this champion, position, and active filters.
+                    <% end %>
+                  </div>
+                </div>
+
+                <div class="grid gap-4 lg:grid-cols-[minmax(20rem,34rem)_minmax(22rem,1fr)] lg:items-end">
+                  <form
+                    :if={is_nil(@selected_champion)}
+                    id="run-it-down-champion-search-form"
+                    phx-change="filter_run_it_down_champions"
+                    phx-submit="select_run_it_down_champion_from_search"
+                    class="max-w-xl"
+                  >
+                    <label
+                      for="run-it-down-champion-search-input"
+                      class="mb-2 block text-xs font-semibold uppercase tracking-wide text-base-content/50"
+                    >
+                      Champion
+                    </label>
+                    <div class="relative z-30 flex items-center gap-2">
+                      <div class="relative min-w-0 flex-1">
+                        <.icon
+                          name="hero-magnifying-glass-mini"
+                          class="pointer-events-none absolute left-2.5 top-3 h-4 w-4 text-base-content/40"
+                        />
+                        <input
+                          id="run-it-down-champion-search-input"
+                          type="search"
+                          name="champion"
+                          value={@run_it_down_champion_filter}
+                          placeholder="Search any champion..."
+                          autocomplete="off"
+                          class="h-10 w-full rounded-lg border border-base-300 bg-base-100 pl-8 pr-3 text-sm focus:border-primary focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        id="select-run-it-down-champion-button"
+                        type="submit"
+                        class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-primary px-4 text-sm font-bold text-primary-content transition hover:bg-primary/90"
+                      >
+                        Select
+                      </button>
+                      <div
+                        :if={@run_it_down_champion_filter != ""}
+                        id="run-it-down-champion-suggestions"
+                        class="absolute left-0 top-full z-50 mt-1 w-[min(100%,28rem)] overflow-hidden rounded-lg border border-base-300 bg-base-100 shadow-2xl"
+                      >
+                        <%= if @displayed_run_it_down_champions == [] do %>
+                          <div class="px-3 py-2 text-xs text-base-content/45">
+                            No matching champion.
+                          </div>
+                        <% else %>
+                          <%= for champion <- @displayed_run_it_down_champions do %>
+                            <button
+                              id={"run-it-down-champion-suggestion-#{champion.key}"}
+                              type="button"
+                              phx-click="select_run_it_down_champion"
+                              phx-value-key={champion.key}
+                              class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold text-base-content/70 transition hover:bg-primary/10 hover:text-primary"
+                            >
+                              <span>{champion.name}</span>
+                              <.icon name="hero-arrow-right-mini" class="h-4 w-4 text-base-content/35" />
+                            </button>
+                          <% end %>
+                        <% end %>
+                      </div>
+                    </div>
+                  </form>
+
+                  <div>
+                    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      Position
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                      <%= for {pos, label} <- @position_defs do %>
+                        <button
+                          id={"run-it-down-position-#{pos}"}
+                          type="button"
+                          phx-click="toggle_run_it_down_position"
+                          phx-value-position={pos}
+                          class={[
+                            "h-10 rounded-lg px-4 text-xs font-bold border transition-colors",
+                            run_it_down_position_button_class(@run_it_down_positions, pos)
+                          ]}
+                        >
+                          {label}
+                        </button>
+                      <% end %>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <%= if @run_it_down_analysis_loading do %>
+                <div
+                  id="run-it-down-analysis-loading"
+                  class="flex items-center gap-2 border-t border-base-300 px-4 py-3 text-sm text-base-content/55"
+                >
+                  <.icon name="hero-arrow-path-mini" class="h-4 w-4 animate-spin text-primary" />
+                  Checking the receipts before anyone locks in with confidence they may not deserve.
+                </div>
+              <% end %>
+
+              <%= if @run_it_down_analysis_error do %>
+                <div
+                  id="run-it-down-analysis-error"
+                  class="border-t border-base-300 px-4 py-3 text-sm text-error"
+                >
+                  {@run_it_down_analysis_error}
+                </div>
+              <% end %>
+
+              <%= if @run_it_down_analysis_history != [] do %>
+                <div class="border-t border-base-300 px-4 py-2.5">
+                  <button
+                    id="toggle-run-it-down-analysis-history"
+                    type="button"
+                    phx-click="toggle_run_it_down_analysis_history"
+                    aria-expanded={@run_it_down_analysis_history_open}
+                    aria-controls="run-it-down-analysis-history"
+                    class="flex w-full items-center gap-3 text-left transition hover:opacity-80"
+                  >
+                    <span class="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+                      <.icon name="hero-clock-mini" class="h-4 w-4 shrink-0" />
+                      History
+                      <span class="text-base-content/35">
+                        ({length(@run_it_down_analysis_history)})
+                      </span>
+                    </span>
+                    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-100 text-base-content/50 transition hover:border-base-content/20 hover:text-base-content">
+                      <.icon
+                        name={
+                          if @run_it_down_analysis_history_open,
+                            do: "hero-chevron-up-mini",
+                            else: "hero-chevron-down-mini"
+                        }
+                        class="h-4 w-4"
+                      />
+                    </span>
+                  </button>
+
+                  <div
+                    :if={@run_it_down_analysis_history_open}
+                    id="run-it-down-analysis-history"
+                    class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3"
+                  >
+                    <%= for stored <- @run_it_down_analysis_history do %>
+                      <button
+                        id={"view-run-it-down-analysis-#{stored.id}"}
+                        type="button"
+                        phx-click="view_run_it_down_analysis"
+                        phx-value-id={stored.id}
+                        class={[
+                          "rounded-lg border px-3 py-2 text-left transition hover:border-primary/50 hover:bg-base-100",
+                          if(@run_it_down_analysis_record_id == stored.id,
+                            do: "border-primary/50 bg-primary/10",
+                            else: "border-base-300 bg-base-100/50"
+                          )
+                        ]}
+                      >
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="text-xs font-bold text-base-content/70">
+                            {format_datetime(stored.generated_at)}
+                          </span>
+                          <%= if stored.fresh? do %>
+                            <span class="rounded-md bg-primary/15 px-1.5 py-px text-xs font-bold text-primary">
+                              Cached
+                            </span>
+                          <% end %>
+                        </span>
+                        <span class="mt-1 line-clamp-2 block text-xs leading-5 text-base-content/45">
+                          {stored.analysis["summary"]}
+                        </span>
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+
+              <%= if @run_it_down_analysis do %>
+                <div class="border-t border-base-300 px-4 py-4">
+                  <.run_it_down_analysis_report
+                    id="run-it-down-analysis-result"
+                    title="Current Lock-In Read"
+                    subtitle="Meter runs from Feed to Carry."
+                    analysis={@run_it_down_analysis}
+                    generated_at={@run_it_down_analysis_generated_at}
+                  />
+                </div>
+              <% end %>
+            </div>
+          </section>
+        <% end %>
 
         <%= if @comparison? do %>
           <section

@@ -323,6 +323,153 @@ defmodule ReceiptsWeb.AIComponents do
     """
   end
 
+  attr(:analysis, :map, required: true)
+  attr(:generated_at, :any, default: nil)
+  attr(:id, :string, required: true)
+  attr(:title, :string, default: "Will They Run It Down?")
+  attr(:subtitle, :string, default: nil)
+  slot(:actions)
+
+  def run_it_down_analysis_report(assigns) do
+    ~H"""
+    <section id={@id} class="rounded-xl border border-warning/30 bg-warning/10 p-4">
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="text-sm font-extrabold uppercase tracking-wide text-warning">{@title}</p>
+          <p :if={@subtitle} class="mt-0.5 text-xs leading-5 text-base-content/55">
+            {@subtitle}
+          </p>
+        </div>
+        {render_slot(@actions)}
+      </div>
+
+      <.run_it_down_analysis_result analysis={@analysis} generated_at={@generated_at} />
+    </section>
+    """
+  end
+
+  attr(:analysis, :map, required: true)
+  attr(:generated_at, :any, default: nil)
+
+  def run_it_down_analysis_result(assigns) do
+    assigns = assign(assigns, :carry_score, carry_score(assigns.analysis["carry_score"]))
+
+    ~H"""
+    <div class="space-y-4">
+      <div class="rounded-xl border border-base-300 bg-base-100/60 p-4 shadow-sm">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <p class="text-xl font-black tracking-tight">{@analysis["verdict"]}</p>
+              <span class={[
+                "rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
+                confidence_badge_class(@analysis["confidence"])
+              ]}>
+                {@analysis["confidence"]} confidence
+              </span>
+            </div>
+            <p class="mt-2 max-w-4xl text-sm leading-6 text-base-content/70">
+              {@analysis["summary"]}
+            </p>
+            <p :if={@generated_at} class="mt-2 text-xs text-base-content/40">
+              Generated {format_datetime(@generated_at)}
+            </p>
+          </div>
+
+          <div class="w-full shrink-0 lg:w-80">
+            <div class="flex items-end justify-between gap-3">
+              <span class="text-xs font-extrabold uppercase tracking-wide text-error">Feed</span>
+              <div class="text-center">
+                <p class={["text-3xl font-black", carry_score_text_class(@carry_score)]}>
+                  {@carry_score}
+                </p>
+                <p class="text-xs font-bold text-base-content/45">{@analysis["risk_label"]}</p>
+              </div>
+              <span class="text-xs font-extrabold uppercase tracking-wide text-success">Carry</span>
+            </div>
+            <div class="mt-3 h-3 overflow-hidden rounded-full border border-base-300 bg-base-300">
+              <div
+                class={["h-full rounded-full transition-all", carry_score_bar_class(@carry_score)]}
+                style={"width: #{@carry_score}%"}
+              >
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid gap-3 lg:grid-cols-2">
+        <.run_it_down_list
+          id="run-it-down-evidence"
+          title="Receipts"
+          items={@analysis["evidence"]}
+          tone="primary"
+        />
+        <.run_it_down_list
+          id="run-it-down-similar-champs"
+          title="Similar Champ Read"
+          items={@analysis["similar_champ_notes"]}
+          tone="info"
+        />
+      </div>
+
+      <%= if @analysis["advice"] != [] do %>
+        <div class="rounded-xl border border-success/25 bg-success/10 p-3 shadow-sm">
+          <p class="text-sm font-extrabold uppercase tracking-wide text-success">Lock-In Notes</p>
+          <ul class="mt-2 space-y-1">
+            <%= for item <- @analysis["advice"] do %>
+              <li class="text-xs leading-5 text-base-content/60">{item}</li>
+            <% end %>
+          </ul>
+        </div>
+      <% end %>
+
+      <%= if @analysis["caveats"] != [] do %>
+        <details class="rounded-xl border border-base-300 bg-base-100/60 p-3 shadow-sm">
+          <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-base-content/50">
+            Caveats
+          </summary>
+          <ul class="mt-2 space-y-1">
+            <%= for caveat <- @analysis["caveats"] do %>
+              <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
+            <% end %>
+          </ul>
+        </details>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr(:id, :string, required: true)
+  attr(:title, :string, required: true)
+  attr(:items, :list, required: true)
+  attr(:tone, :string, required: true)
+
+  defp run_it_down_list(assigns) do
+    ~H"""
+    <section :if={@items != []} id={@id} class="rounded-xl border border-base-300 bg-base-100/60 p-4 shadow-sm">
+      <p class={[
+        "text-sm font-extrabold uppercase tracking-wide",
+        if(@tone == "info", do: "text-info", else: "text-primary")
+      ]}>
+        {@title}
+      </p>
+      <ul class="mt-3 space-y-2">
+        <%= for item <- @items do %>
+          <li class="flex gap-2 text-sm leading-6 text-base-content/65">
+            <span class={[
+              "mt-2 h-1.5 w-1.5 shrink-0 rounded-full",
+              if(@tone == "info", do: "bg-info", else: "bg-primary")
+            ]}>
+            </span>
+            <span>{item}</span>
+          </li>
+        <% end %>
+      </ul>
+    </section>
+    """
+  end
+
   attr(:id, :string, required: true)
   attr(:title, :string, required: true)
   attr(:tone, :string, required: true)
@@ -423,6 +570,26 @@ defmodule ReceiptsWeb.AIComponents do
   defp trend_badge_class("struggling"), do: "border-error/30 bg-error/15 text-error"
   defp trend_badge_class("volatile"), do: "border-warning/30 bg-warning/15 text-warning"
   defp trend_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
+
+  defp carry_score(score) when is_integer(score), do: score |> max(0) |> min(100)
+  defp carry_score(score) when is_float(score), do: score |> round() |> carry_score()
+
+  defp carry_score(score) when is_binary(score) do
+    case Integer.parse(score) do
+      {parsed, _rest} -> carry_score(parsed)
+      :error -> 50
+    end
+  end
+
+  defp carry_score(_score), do: 50
+
+  defp carry_score_text_class(score) when score < 35, do: "text-error"
+  defp carry_score_text_class(score) when score < 65, do: "text-warning"
+  defp carry_score_text_class(_score), do: "text-success"
+
+  defp carry_score_bar_class(score) when score < 35, do: "bg-error"
+  defp carry_score_bar_class(score) when score < 65, do: "bg-warning"
+  defp carry_score_bar_class(_score), do: "bg-success"
 
   defp format_datetime(nil), do: "—"
 

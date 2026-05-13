@@ -4,6 +4,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
   require Ash.Query
 
   alias Receipts.AI.CompSuggestion, as: CompSuggestionService
+  alias Receipts.AI.RunItDownAnalysis, as: RunItDownAnalysisService
   alias Receipts.AI.WinLossAnalysis, as: WinLossAnalysisService
 
   alias Receipts.LoL.{
@@ -14,6 +15,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     Match,
     MatchParticipant,
     Player,
+    RunItDownAnalysisCache,
     WinLossAnalysisCache
   }
 
@@ -114,6 +116,105 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     assert has_element?(view, "#receipts-result-#{player_a.id}", "6/1/3")
     refute has_element?(view, "#receipts-result-#{player_a.id}", "20/1/3")
+  end
+
+  test "single player run it down panel selects any champion and analyzes zero-game samples", %{
+    conn: conn
+  } do
+    player = create_player("Koozie")
+    create_account(player, "A")
+    create_champion("Ahri", 103)
+
+    admin_conn = log_in_admin(conn)
+    {:ok, view, _html} = live(admin_conn, ~p"/players/#{player.id}")
+
+    assert has_element?(view, "#run-it-down-analysis-panel")
+    assert has_element?(view, "#run-it-down-needs-champion", "Select a champion")
+    assert has_element?(view, "#analyze-run-it-down-button[disabled]")
+    assert has_element?(view, "#run-it-down-champion-search-input")
+
+    view
+    |> form("#run-it-down-champion-search-form", %{"champion" => "Ah"})
+    |> render_change()
+
+    assert has_element?(view, "#run-it-down-champion-suggestions")
+    assert has_element?(view, "#run-it-down-champion-suggestion-Ahri", "Ahri")
+
+    view
+    |> element("#run-it-down-champion-suggestion-Ahri")
+    |> render_click()
+
+    assert_patch(view, ~p"/players/#{player.id}?champion=Ahri")
+    assert has_element?(view, "#run-it-down-selected-champion", "Ahri")
+    assert has_element?(view, "#clear-run-it-down-champion")
+    refute has_element?(view, "#run-it-down-champion-search-input")
+    assert has_element?(view, "#run-it-down-needs-position", "Select a position")
+
+    view
+    |> element("#clear-run-it-down-champion")
+    |> render_click()
+
+    assert_patch(view, ~p"/players/#{player.id}")
+    assert has_element?(view, "#run-it-down-champion-search-input")
+
+    view
+    |> form("#run-it-down-champion-search-form", %{"champion" => "Ahri"})
+    |> render_submit()
+
+    assert_patch(view, ~p"/players/#{player.id}?champion=Ahri")
+
+    view
+    |> element("#run-it-down-position-JUNGLE")
+    |> render_click()
+
+    view
+    |> element("#run-it-down-position-TOP")
+    |> render_click()
+
+    assert has_element?(view, "#run-it-down-selected-champion", "Jungle")
+    assert has_element?(view, "#run-it-down-selected-champion", "Top")
+    refute has_element?(view, "#analyze-run-it-down-button[disabled]")
+
+    view
+    |> element("#analyze-run-it-down-button")
+    |> render_click()
+
+    assert has_element?(view, "#run-it-down-analysis-loading")
+
+    render_async(view)
+
+    assert has_element?(view, "#run-it-down-analysis-result", "Probably not a felony")
+    assert has_element?(view, "#run-it-down-analysis-result", "Feed")
+    assert has_element?(view, "#run-it-down-analysis-result", "Carry")
+    assert has_element?(view, "#run-it-down-analysis-result", "42")
+    assert has_element?(view, "#run-it-down-analysis-result", "Zero exact champion-position")
+    assert run_it_down_analysis_count(player.id, "Ahri", ["JUNGLE", "TOP"]) == 1
+  end
+
+  test "single player run it down analysis is admin only but cached reads are visible", %{
+    conn: conn
+  } do
+    player = create_player("Koozie")
+    ahri = create_champion("Ahri", 103)
+
+    create_run_it_down_analysis(
+      player.id,
+      ahri,
+      "MIDDLE",
+      DateTime.utc_now(),
+      "Cached read says he can probably keep the monitor on."
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/players/#{player.id}?champion=Ahri")
+
+    refute has_element?(view, "#analyze-run-it-down-button")
+
+    view
+    |> element("#run-it-down-position-MIDDLE")
+    |> render_click()
+
+    assert has_element?(view, "#run-it-down-analysis-cache-date", "Cached analysis generated")
+    assert has_element?(view, "#run-it-down-analysis-result", "Cached read says")
   end
 
   test "comp suggestion button is admin only", %{conn: conn} do
@@ -583,7 +684,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
       cs: 100,
       damage_dealt: 1000,
       vision_score: 10,
-      position: "MIDDLE",
+      position: Keyword.get(opts, :position, "MIDDLE"),
       items: [],
       game_datetime: match.game_datetime,
       queue_type: match.queue_type,
@@ -631,6 +732,42 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     CompPromptLabRun
     |> Ash.Query.filter(group_key == ^group_key)
     |> Ash.read!()
+  end
+
+  defp create_run_it_down_analysis(player_id, champion, position, generated_at, summary) do
+    positions = List.wrap(position)
+
+    RunItDownAnalysisCache
+    |> Ash.Changeset.for_create(:create, %{
+      cache_key: RunItDownAnalysisService.cache_key(player_id, champion.key, positions),
+      player_id: player_id,
+      champion_id: champion.id,
+      position: Enum.join(positions, ","),
+      positions: positions,
+      filters: RunItDownAnalysisService.cache_filters(),
+      generated_at: generated_at,
+      analysis: %{
+        "verdict" => "Cached verdict",
+        "summary" => summary,
+        "carry_score" => 63,
+        "confidence" => "medium",
+        "risk_label" => "Playable",
+        "evidence" => [],
+        "similar_champ_notes" => [],
+        "advice" => [],
+        "caveats" => []
+      }
+    })
+    |> Ash.create!()
+  end
+
+  defp run_it_down_analysis_count(player_id, champion_key, position) do
+    cache_key = RunItDownAnalysisService.cache_key(player_id, champion_key, position)
+
+    RunItDownAnalysisCache
+    |> Ash.Query.filter(cache_key == ^cache_key)
+    |> Ash.read!()
+    |> length()
   end
 
   defp create_win_loss_analysis(player_ids, generated_at, summary) do
