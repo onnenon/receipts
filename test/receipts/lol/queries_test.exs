@@ -77,6 +77,21 @@ defmodule Receipts.LoL.QueriesTest do
     assert match_ids == [ranked_flex.id, ranked_solo.id]
   end
 
+  test "recent_games excludes remakes" do
+    player = create_player("Toby")
+    account = create_account(player, "A")
+    teemo = create_champion("Teemo", 17)
+
+    remake = create_match("remake-feed", ~U[2026-05-10 13:00:00Z])
+    completed = create_match("completed-feed", ~U[2026-05-10 12:00:00Z])
+
+    create_participant(account, remake, teemo, false, kills: 0, is_remake: true)
+    create_participant(account, completed, teemo, true, kills: 6)
+
+    assert [game] = Queries.recent_games()
+    assert game.id == completed.id
+  end
+
   test "multi-player receipts only include games containing every selected player" do
     player_a = create_player("Koozie")
     player_b = create_player("Kupo")
@@ -115,6 +130,25 @@ defmodule Receipts.LoL.QueriesTest do
     assert Enum.map(result_by_player[player_b.id].recent_games, & &1.match_id) == [
              shared_match.id
            ]
+  end
+
+  test "receipts exclude remakes from game counts and win rates" do
+    player = create_player("Toby")
+    account = create_account(player, "A")
+    teemo = create_champion("Teemo", 17)
+
+    remake = create_match("teemo-remake", ~U[2026-05-10 13:00:00Z])
+    completed = create_match("teemo-completed", ~U[2026-05-10 12:00:00Z])
+
+    create_participant(account, remake, teemo, false, kills: 0, is_remake: true)
+    create_participant(account, completed, teemo, true, kills: 8)
+
+    assert {:ok, result} = Queries.receipts(player.id, "Teemo")
+
+    assert result.games_played == 1
+    assert result.wins == 1
+    assert result.win_rate == 100.0
+    assert Enum.map(result.recent_games, & &1.match_id) == [completed.id]
   end
 
   test "comp suggestion context includes shared and recent non-shared role evidence" do
@@ -208,6 +242,7 @@ defmodule Receipts.LoL.QueriesTest do
       damage_dealt: 1000,
       vision_score: 10,
       position: Keyword.get(opts, :position, "MIDDLE"),
+      is_remake: Keyword.get(opts, :is_remake, false),
       items: [],
       game_datetime: match.game_datetime,
       queue_type: match.queue_type,

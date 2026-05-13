@@ -65,6 +65,7 @@ defmodule Receipts.LoL.Queries do
       MatchParticipant
       |> join(:inner, [participant], account in Account, on: account.id == participant.account_id)
       |> where([participant, account], account.player_id in ^player_ids)
+      |> without_remakes()
       |> where([participant], participant.queue_type in ^queue_types)
       |> apply_ecto_year_filters(from_year, to_year)
       |> group_by([participant], participant.match_id)
@@ -104,6 +105,7 @@ defmodule Receipts.LoL.Queries do
         true ->
           MatchParticipant
           |> Ash.Query.filter(account_id in ^Map.keys(account_player_ids))
+          |> without_remakes()
           |> Ash.Query.filter(match_id in ^match_ids)
           |> Ash.Query.filter(queue_type in ^queue_types)
           |> apply_year_filters(from_year, to_year)
@@ -177,6 +179,7 @@ defmodule Receipts.LoL.Queries do
     recent_match_ids =
       MatchParticipant
       |> join(:inner, [participant], match in Match, on: match.id == participant.match_id)
+      |> without_remakes()
       |> where([_participant, match], match.queue_type in ^queue_types)
       |> group_by([participant, _match], participant.match_id)
       |> select([participant, match], %{
@@ -208,6 +211,7 @@ defmodule Receipts.LoL.Queries do
           on: match.id == participant.match_id
         )
         |> where([participant], participant.match_id in ^match_ids)
+        |> without_remakes()
         |> where(
           [_participant, _account, _player, _champion, match],
           match.queue_type in ^queue_types
@@ -259,6 +263,7 @@ defmodule Receipts.LoL.Queries do
   defp player_home_totals(player_ids) do
     MatchParticipant
     |> join(:inner, [participant], account in Account, on: account.id == participant.account_id)
+    |> without_remakes()
     |> where([_participant, account], account.player_id in ^player_ids)
     |> group_by([_participant, account], account.player_id)
     |> select([participant, account], %{
@@ -280,6 +285,7 @@ defmodule Receipts.LoL.Queries do
     |> join(:inner, [participant, _account], champion in Champion,
       on: champion.id == participant.champion_id
     )
+    |> without_remakes()
     |> where([_participant, account], account.player_id in ^player_ids)
     |> group_by([_participant, account, champion], [account.player_id, champion.id])
     |> select([participant, account, champion], %{
@@ -346,6 +352,7 @@ defmodule Receipts.LoL.Queries do
       else
         MatchParticipant
         |> Ash.Query.filter(account_id in ^account_ids)
+        |> without_remakes()
         |> Ash.Query.load(:champion)
         |> Ash.read!()
       end
@@ -398,6 +405,7 @@ defmodule Receipts.LoL.Queries do
         true ->
           MatchParticipant
           |> Ash.Query.filter(account_id in ^account_ids)
+          |> without_remakes()
           |> Ash.Query.filter(queue_type in ^queue_types)
           |> apply_match_filter(match_ids)
           |> apply_year_filters(from_year, to_year)
@@ -436,6 +444,7 @@ defmodule Receipts.LoL.Queries do
         true ->
           MatchParticipant
           |> Ash.Query.filter(account_id in ^account_ids)
+          |> without_remakes()
           |> Ash.Query.filter(queue_type in ^queue_types)
           |> apply_match_filter(match_ids)
           |> apply_year_filters(from_year, to_year)
@@ -521,6 +530,7 @@ defmodule Receipts.LoL.Queries do
         true ->
           MatchParticipant
           |> Ash.Query.filter(account_id in ^account_ids)
+          |> without_remakes()
           |> Ash.Query.filter(queue_type in ^queue_types)
           |> apply_match_filter(match_ids)
           |> apply_year_filters(from_year, to_year)
@@ -1005,6 +1015,7 @@ defmodule Receipts.LoL.Queries do
       true ->
         MatchParticipant
         |> Ash.Query.filter(account_id in ^account_ids)
+        |> without_remakes()
         |> Ash.Query.filter(queue_type in ^queue_types)
         |> apply_match_filter(match_ids)
         |> apply_year_filters(from_year, to_year)
@@ -1027,6 +1038,7 @@ defmodule Receipts.LoL.Queries do
     else
       MatchParticipant
       |> Ash.Query.filter(account_id in ^account_ids)
+      |> without_remakes()
       |> Ash.Query.filter(queue_type in ^queue_types)
       |> apply_year_filters(from_year, to_year)
       |> Ash.Query.sort(game_datetime: :desc)
@@ -1202,6 +1214,7 @@ defmodule Receipts.LoL.Queries do
         true ->
           MatchParticipant
           |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
+          |> without_remakes()
           |> Ash.Query.filter(queue_type in ^queue_types)
           |> apply_match_filter(match_ids)
           |> apply_year_filters(from_year, to_year)
@@ -1256,6 +1269,7 @@ defmodule Receipts.LoL.Queries do
         true ->
           MatchParticipant
           |> Ash.Query.filter(account_id in ^account_ids and champion_id == ^champion.id)
+          |> without_remakes()
           |> Ash.Query.filter(queue_type in ^queue_types)
           |> apply_match_filter(match_ids)
           |> apply_year_filters(from_year, to_year)
@@ -1285,6 +1299,14 @@ defmodule Receipts.LoL.Queries do
 
   defp apply_position_filter(query, positions) do
     Ash.Query.filter(query, position in ^positions)
+  end
+
+  defp without_remakes(%Ash.Query{} = query) do
+    Ash.Query.filter(query, is_remake == false)
+  end
+
+  defp without_remakes(%Ecto.Query{} = query) do
+    where(query, [participant], participant.is_remake == false)
   end
 
   defp apply_match_filter(query, nil), do: query
@@ -1350,7 +1372,7 @@ defmodule Receipts.LoL.Queries do
       MapSet.new()
     else
       from(p in MatchParticipant,
-        where: p.account_id in ^account_ids and not is_nil(p.queue_type),
+        where: p.account_id in ^account_ids and p.is_remake == false and not is_nil(p.queue_type),
         select: p.queue_type,
         distinct: true
       )
@@ -1369,7 +1391,7 @@ defmodule Receipts.LoL.Queries do
       MapSet.new()
     else
       from(p in MatchParticipant,
-        where: p.match_id in ^match_ids and not is_nil(p.queue_type),
+        where: p.match_id in ^match_ids and p.is_remake == false and not is_nil(p.queue_type),
         select: p.queue_type,
         distinct: true
       )

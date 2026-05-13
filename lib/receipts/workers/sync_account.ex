@@ -451,6 +451,7 @@ defmodule Receipts.Workers.SyncAccount do
           vision_score: participant["visionScore"],
           position: if(position == "", do: nil, else: position),
           team_id: participant["teamId"],
+          is_remake: remake_participant?(participant),
           items: items,
           raw_participant: participant,
           game_datetime: game_datetime,
@@ -470,6 +471,10 @@ defmodule Receipts.Workers.SyncAccount do
     Receipts.LoL.Champion
     |> Ash.read!()
     |> Map.new(&{&1.riot_id, &1})
+  end
+
+  defp remake_participant?(participant) do
+    participant["gameEndedInEarlySurrender"] == true
   end
 
   defp resolve_champion(champion_map, champion_riot_id, match_id) do

@@ -35,6 +35,7 @@ defmodule Receipts.LoL.MatchParticipant do
     attribute(:vision_score, :integer, public?: true)
     attribute(:position, :string, public?: true)
     attribute(:team_id, :integer, public?: true)
+    attribute(:is_remake, :boolean, default: false, allow_nil?: false, public?: true)
 
     # Denormalized from Match for filter/sort performance (no JOIN needed)
     attribute(:game_datetime, :utc_datetime_usec, public?: true)
@@ -108,6 +109,7 @@ defmodule Receipts.LoL.MatchParticipant do
         :vision_score,
         :position,
         :team_id,
+        :is_remake,
         :items,
         :raw_participant,
         :game_datetime,
@@ -127,6 +129,7 @@ defmodule Receipts.LoL.MatchParticipant do
         :vision_score,
         :position,
         :team_id,
+        :is_remake,
         :items,
         :raw_participant,
         :game_datetime,

@@ -138,6 +138,37 @@ defmodule Receipts.Workers.SyncAccountTest do
     assert participant_count(account) == 1
   end
 
+  test "marks participants from remake payloads", %{
+    account: account,
+    champion: champion
+  } do
+    base_time = ~U[2026-05-10 12:00:00Z]
+    account = update_account!(account, %{history_fully_synced: true})
+
+    matches =
+      build_matches(account, champion, 1, base_time)
+      |> Enum.map(fn {match_id, match} ->
+        data =
+          update_in(match.data, ["info", "participants"], fn [participant] ->
+            [Map.put(participant, "gameEndedInEarlySurrender", true)]
+          end)
+
+        {match_id, %{match | data: data}}
+      end)
+
+    stub_match_ids_from_matches(matches)
+    stub_match_details(matches)
+
+    assert :ok = SyncAccount.perform(%Oban.Job{args: %{"account_id" => account.id}})
+
+    assert [participant] =
+             MatchParticipant
+             |> Ash.read!()
+             |> Enum.filter(&(&1.account_id == account.id))
+
+    assert participant.is_remake
+  end
+
   test "records sync completion separately from the newest match cursor", %{account: account} do
     checkpoint = DateTime.add(DateTime.utc_now(), -6, :day)
     account = update_account!(account, %{newest_synced_at: checkpoint})

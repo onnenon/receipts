@@ -70,12 +70,17 @@ defmodule Receipts.LoL.StoredMatchParticipantBackfill do
       vision_score: participant["visionScore"],
       position: if(position == "", do: nil, else: position),
       team_id: participant["teamId"],
+      is_remake: remake_participant?(participant),
       items: items,
       raw_participant: participant,
       game_datetime: match.game_datetime,
       queue_type: match.queue_type
     })
     |> Ash.create!()
+  end
+
+  defp remake_participant?(participant) do
+    participant["gameEndedInEarlySurrender"] == true
   end
 
   defp load_champion_map do
