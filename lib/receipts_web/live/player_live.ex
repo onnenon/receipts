@@ -1568,8 +1568,11 @@ defmodule ReceiptsWeb.PlayerLive do
               <% end %>
 
               <%= if @comp_suggestion do %>
-                <div id="comp-suggestion-result" class="space-y-4 border-t border-base-300 px-4 py-4">
-                  <.comp_suggestion_result
+                <div class="border-t border-base-300 px-4 py-4">
+                  <.comp_suggestion_report
+                    id="comp-suggestion-result"
+                    title="Current Comp Read"
+                    subtitle="Same result layout used by Prompt Lab."
                     suggestion={@comp_suggestion}
                     generated_at={@comp_suggestion_generated_at}
                   />
@@ -1736,8 +1739,11 @@ defmodule ReceiptsWeb.PlayerLive do
               <% end %>
 
               <%= if @win_loss_analysis do %>
-                <div id="win-loss-analysis-result" class="space-y-4 border-t border-base-300 px-4 py-4">
-                  <.win_loss_analysis_result
+                <div class="border-t border-base-300 px-4 py-4">
+                  <.win_loss_analysis_report
+                    id="win-loss-analysis-result"
+                    title="Current Read"
+                    subtitle="Same report layout used by Prompt Lab."
                     analysis={@win_loss_analysis}
                     generated_at={@win_loss_analysis_generated_at}
                   />

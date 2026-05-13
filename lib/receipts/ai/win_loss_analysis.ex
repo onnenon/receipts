@@ -9,12 +9,12 @@ defmodule Receipts.AI.WinLossAnalysis do
   @default_temperature 0.2
   @default_system_instruction """
   You are analyzing recent League of Legends games for a private friend group.
-  Use only the supplied JSON. Give balanced feedback: celebrate who is carrying
-  or making games easier, call out who is underperforming, and point lighthearted
-  blame where the stat lines support it. Do not favor wins or losses by default;
-  explain what is working in wins, what is breaking in losses, and what concrete
-  adjustments the group should try. Anchor claims in stat lines from recent shared
-  games first, then recent individual form.
+  Use only the supplied JSON. Write a retrospective about what past shared games
+  prove: what went well, what went poorly, and which concrete games or stat lines
+  support those claims. Improvement advice is secondary and should stay brief.
+  Do not over-index on generic League advice. Prefer specific claims supported by
+  shared games first, then recent individual form when it helps explain the pattern.
+  Include kudos and fun-but-fair blame only when the stat lines support it.
   Be explicit about small samples and team context. Do not invent player history.
   All players in this friend group are men; use he/him/his pronouns for every player.
   Write blunt but fair user-facing prose. Never include raw JSON path names, snake_case keys,
@@ -24,9 +24,10 @@ defmodule Receipts.AI.WinLossAnalysis do
   Generate a game analysis for this selected group.
 
   Return JSON matching the schema. Use player_id values exactly as provided.
-  Cover both wins and losses without treating either as more important by default.
-  Include kudos, useful feedback, and fun-but-fair blame for who is carrying hard
-  and who is not pulling weight.
+  Analyze the games as a retrospective, not primarily as coaching. Start with a
+  one-sentence verdict, then explain what went well and what went poorly. Every
+  major claim should include a receipt: a specific game, champion, stat line, or
+  repeated stat pattern from the supplied context. Keep run-it-back advice short.
   """
   @context_block_definitions [
     %{
@@ -355,28 +356,31 @@ defmodule Receipts.AI.WinLossAnalysis do
       properties: %{
         summary: %{type: "STRING"},
         confidence: %{type: "STRING", enum: ["low", "medium", "high"]},
-        loss_causes: %{type: "ARRAY", items: insight_schema()},
+        went_well: %{type: "ARRAY", items: insight_schema()},
+        went_poorly: %{type: "ARRAY", items: insight_schema()},
+        receipts: %{type: "ARRAY", items: receipt_schema()},
         player_readouts: %{type: "ARRAY", items: player_readout_schema()},
-        carry_highlights: %{type: "ARRAY", items: insight_schema()},
-        recommendations: %{type: "ARRAY", items: %{type: "STRING"}},
+        run_it_back: %{type: "ARRAY", items: %{type: "STRING"}},
         caveats: %{type: "ARRAY", items: %{type: "STRING"}}
       },
       required: [
         "summary",
         "confidence",
-        "loss_causes",
+        "went_well",
+        "went_poorly",
+        "receipts",
         "player_readouts",
-        "carry_highlights",
-        "recommendations",
+        "run_it_back",
         "caveats"
       ],
       propertyOrdering: [
         "summary",
         "confidence",
-        "loss_causes",
+        "went_well",
+        "went_poorly",
+        "receipts",
         "player_readouts",
-        "carry_highlights",
-        "recommendations",
+        "run_it_back",
         "caveats"
       ]
     }
@@ -389,10 +393,26 @@ defmodule Receipts.AI.WinLossAnalysis do
         title: %{type: "STRING"},
         details: %{type: "STRING"},
         evidence: %{type: "ARRAY", items: %{type: "STRING"}},
-        severity: %{type: "STRING", enum: ["low", "medium", "high"]}
+        evidence_strength: %{type: "STRING", enum: ["low", "medium", "high"]}
       },
-      required: ["title", "details", "evidence", "severity"],
-      propertyOrdering: ["title", "details", "evidence", "severity"]
+      required: ["title", "details", "evidence", "evidence_strength"],
+      propertyOrdering: ["title", "details", "evidence", "evidence_strength"]
+    }
+  end
+
+  defp receipt_schema do
+    %{
+      type: "OBJECT",
+      properties: %{
+        label: %{type: "STRING"},
+        player_name: %{type: "STRING"},
+        champion: %{type: "STRING"},
+        statline: %{type: "STRING"},
+        result: %{type: "STRING"},
+        takeaway: %{type: "STRING"}
+      },
+      required: ["label", "player_name", "champion", "statline", "result", "takeaway"],
+      propertyOrdering: ["label", "player_name", "champion", "statline", "result", "takeaway"]
     }
   end
 
@@ -402,12 +422,22 @@ defmodule Receipts.AI.WinLossAnalysis do
       properties: %{
         player_id: %{type: "STRING"},
         player_name: %{type: "STRING"},
-        verdict: %{type: "STRING"},
+        good: %{type: "STRING"},
+        bad: %{type: "STRING"},
+        receipt: %{type: "STRING"},
         trend: %{type: "STRING", enum: ["carrying", "stable", "struggling", "volatile"]},
         evidence: %{type: "ARRAY", items: %{type: "STRING"}}
       },
-      required: ["player_id", "player_name", "verdict", "trend", "evidence"],
-      propertyOrdering: ["player_id", "player_name", "verdict", "trend", "evidence"]
+      required: ["player_id", "player_name", "good", "bad", "receipt", "trend", "evidence"],
+      propertyOrdering: [
+        "player_id",
+        "player_name",
+        "good",
+        "bad",
+        "receipt",
+        "trend",
+        "evidence"
+      ]
     }
   end
 
@@ -417,13 +447,14 @@ defmodule Receipts.AI.WinLossAnalysis do
     %{
       "summary" => clean_prose(Map.get(response, "summary", "")),
       "confidence" => Map.get(response, "confidence", "low"),
-      "loss_causes" => Enum.map(Map.get(response, "loss_causes", []), &clean_insight/1),
+      "went_well" => Enum.map(Map.get(response, "went_well", []), &clean_insight/1),
+      "went_poorly" => Enum.map(Map.get(response, "went_poorly", []), &clean_insight/1),
+      "receipts" => Enum.map(Map.get(response, "receipts", []), &clean_receipt/1),
       "player_readouts" =>
         response
         |> Map.get("player_readouts", [])
         |> Enum.map(&clean_player_readout(&1, selected_players)),
-      "carry_highlights" => Enum.map(Map.get(response, "carry_highlights", []), &clean_insight/1),
-      "recommendations" => Enum.map(Map.get(response, "recommendations", []), &clean_prose/1),
+      "run_it_back" => Enum.map(Map.get(response, "run_it_back", []), &clean_prose/1),
       "caveats" => Enum.map(Map.get(response, "caveats", []), &clean_prose/1)
     }
   end
@@ -432,13 +463,26 @@ defmodule Receipts.AI.WinLossAnalysis do
     %{
       "summary" => clean_prose(Map.get(analysis, "summary", "")),
       "confidence" => Map.get(analysis, "confidence", "low"),
-      "loss_causes" => Enum.map(Map.get(analysis, "loss_causes", []), &clean_insight/1),
+      "went_well" =>
+        analysis
+        |> Map.get("went_well", Map.get(analysis, "carry_highlights", []))
+        |> Enum.map(&clean_insight/1),
+      "went_poorly" =>
+        analysis
+        |> Map.get("went_poorly", Map.get(analysis, "loss_causes", []))
+        |> Enum.map(&clean_insight/1),
+      "receipts" =>
+        analysis
+        |> Map.get("receipts", [])
+        |> Enum.map(&clean_receipt/1),
       "player_readouts" =>
         analysis
         |> Map.get("player_readouts", [])
         |> Enum.map(&clean_player_readout(&1, %{})),
-      "carry_highlights" => Enum.map(Map.get(analysis, "carry_highlights", []), &clean_insight/1),
-      "recommendations" => Enum.map(Map.get(analysis, "recommendations", []), &clean_prose/1),
+      "run_it_back" =>
+        analysis
+        |> Map.get("run_it_back", Map.get(analysis, "recommendations", []))
+        |> Enum.map(&clean_prose/1),
       "caveats" => Enum.map(Map.get(analysis, "caveats", []), &clean_prose/1)
     }
   end
@@ -447,10 +491,11 @@ defmodule Receipts.AI.WinLossAnalysis do
     %{
       "summary" => "",
       "confidence" => "low",
-      "loss_causes" => [],
+      "went_well" => [],
+      "went_poorly" => [],
+      "receipts" => [],
       "player_readouts" => [],
-      "carry_highlights" => [],
-      "recommendations" => [],
+      "run_it_back" => [],
       "caveats" => []
     }
   end
@@ -461,6 +506,9 @@ defmodule Receipts.AI.WinLossAnalysis do
     %{
       "player_id" => player_id,
       "player_name" => Map.get(selected_players, player_id, Map.get(readout, "player_name", "")),
+      "good" => clean_prose(Map.get(readout, "good", "")),
+      "bad" => clean_prose(Map.get(readout, "bad", "")),
+      "receipt" => clean_prose(Map.get(readout, "receipt", "")),
       "verdict" => clean_prose(Map.get(readout, "verdict", "")),
       "trend" => Map.get(readout, "trend", "stable"),
       "evidence" => Enum.map(Map.get(readout, "evidence", []), &clean_prose/1)
@@ -471,6 +519,9 @@ defmodule Receipts.AI.WinLossAnalysis do
     %{
       "player_id" => "",
       "player_name" => "",
+      "good" => "",
+      "bad" => "",
+      "receipt" => "",
       "verdict" => "",
       "trend" => "stable",
       "evidence" => []
@@ -478,16 +529,45 @@ defmodule Receipts.AI.WinLossAnalysis do
   end
 
   defp clean_insight(insight) when is_map(insight) do
+    evidence_strength =
+      Map.get(
+        insight,
+        "evidence_strength",
+        Map.get(insight, "impact", Map.get(insight, "severity", "medium"))
+      )
+
     %{
       "title" => clean_prose(Map.get(insight, "title", "")),
       "details" => clean_prose(Map.get(insight, "details", "")),
       "evidence" => Enum.map(Map.get(insight, "evidence", []), &clean_prose/1),
-      "severity" => Map.get(insight, "severity", "medium")
+      "evidence_strength" => evidence_strength
     }
   end
 
   defp clean_insight(_insight) do
-    %{"title" => "", "details" => "", "evidence" => [], "severity" => "medium"}
+    %{"title" => "", "details" => "", "evidence" => [], "evidence_strength" => "medium"}
+  end
+
+  defp clean_receipt(receipt) when is_map(receipt) do
+    %{
+      "label" => clean_prose(Map.get(receipt, "label", "")),
+      "player_name" => clean_prose(Map.get(receipt, "player_name", "")),
+      "champion" => clean_prose(Map.get(receipt, "champion", "")),
+      "statline" => clean_prose(Map.get(receipt, "statline", "")),
+      "result" => clean_prose(Map.get(receipt, "result", "")),
+      "takeaway" => clean_prose(Map.get(receipt, "takeaway", ""))
+    }
+  end
+
+  defp clean_receipt(_receipt) do
+    %{
+      "label" => "",
+      "player_name" => "",
+      "champion" => "",
+      "statline" => "",
+      "result" => "",
+      "takeaway" => ""
+    }
   end
 
   defp clean_prose(value) when is_binary(value) do

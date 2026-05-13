@@ -360,8 +360,14 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
 
     render_async(admin_view)
 
-    assert has_element?(admin_view, "#win-loss-analysis-result", "low damage mid games")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "enough fight presence")
     assert has_element?(admin_view, "#win-loss-analysis-result", "Mid pressure falls off")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "What Went Well")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "What Went Poorly")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "Ugliest Mid Loss")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "Strong evidence")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "Evidence: medium")
+    assert has_element?(admin_view, "#win-loss-analysis-result", "Run It Back")
     assert has_element?(admin_view, "#win-loss-analysis-result", "Koozie")
     assert has_element?(admin_view, "#win-loss-analysis-result", "carrying hard")
     refute has_element?(admin_view, "#win-loss-analysis-result", "snake_case")
@@ -458,7 +464,7 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
     view |> element("#analyze-win-loss-button") |> render_click()
     render_async(view)
 
-    assert has_element?(view, "#win-loss-analysis-result", "low damage mid games")
+    assert has_element?(view, "#win-loss-analysis-result", "enough fight presence")
     assert win_loss_analysis_count(player_ids) == 2
   end
 
@@ -637,10 +643,11 @@ defmodule ReceiptsWeb.PlayerSelectLiveTest do
       analysis: %{
         "summary" => summary,
         "confidence" => "medium",
-        "loss_causes" => [],
+        "went_well" => [],
+        "went_poorly" => [],
+        "receipts" => [],
         "player_readouts" => [],
-        "carry_highlights" => [],
-        "recommendations" => [],
+        "run_it_back" => [],
         "caveats" => []
       }
     })

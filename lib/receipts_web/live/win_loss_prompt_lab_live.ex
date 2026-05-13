@@ -512,13 +512,14 @@ defmodule ReceiptsWeb.WinLossPromptLabLive do
           </div>
         </section>
 
-        <section
+        <.win_loss_analysis_report
           :if={@result}
           id="win-loss-prompt-lab-result"
-          class="rounded-xl border border-secondary/30 bg-secondary/10 p-4"
+          title="Test Result"
+          analysis={@result}
+          generated_at={@generated_at}
         >
-          <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p class="text-xs font-semibold uppercase tracking-wide text-secondary">Test Result</p>
+          <:actions>
             <div :if={@run_id} id={"quality-rating-#{@run_id}"} class="flex items-center gap-2">
               <span class="text-xs font-semibold text-base-content/50">Rate output:</span>
               <%= for n <- 1..5 do %>
@@ -543,9 +544,8 @@ defmodule ReceiptsWeb.WinLossPromptLabLive do
                 saved
               </span>
             </div>
-          </div>
-          <.win_loss_analysis_result analysis={@result} generated_at={@generated_at} />
-        </section>
+          </:actions>
+        </.win_loss_analysis_report>
 
         <section
           :if={@history != []}

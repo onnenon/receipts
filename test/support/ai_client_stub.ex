@@ -6,41 +6,57 @@ defmodule Receipts.AIClientStub do
       {:ok,
        %{
          "summary" =>
-           "Recent games are mostly decided by low damage mid games, but Kupo is carrying hard when fights go long.",
+           "Koozie and Kupo have enough fight presence to win scrappy games, but the receipts turn ugly when mid pressure drops and deaths pile up.",
          "confidence" => "medium",
-         "loss_causes" => [
+         "went_well" => [
+           %{
+             "title" => "Kupo keeps fights playable",
+             "details" =>
+               "His recent stat lines show strong assist totals even when the group loses.",
+             "evidence" => ["Support loss: 2/3/18", "High assist games keep late fights close"],
+             "evidence_strength" => "medium"
+           }
+         ],
+         "went_poorly" => [
            %{
              "title" => "Mid pressure falls off in losses",
              "details" => "Koozie's recent loss stat lines show low damage and too many deaths.",
              "evidence" => ["Loss on Ahri: 1/7/4 with 8k damage", "Shared loss sample is small"],
-             "severity" => "high"
+             "evidence_strength" => "high"
+           }
+         ],
+         "receipts" => [
+           %{
+             "label" => "Ugliest Mid Loss",
+             "player_name" => "Koozie",
+             "champion" => "Ahri",
+             "statline" => "1/7/4",
+             "result" => "Loss",
+             "takeaway" =>
+               "The damage never came online, so the group had no reliable mid-game threat."
            }
          ],
          "player_readouts" => [
            %{
              "player_id" => "player-a",
              "player_name" => "Koozie",
-             "verdict" => "He is not pulling enough weight in losing games.",
+             "good" => "He can stabilize games when his lane does not collapse early.",
+             "bad" => "He is not pulling enough weight in losing games.",
+             "receipt" => "Ahri loss: 1/7/4 with 8k damage.",
              "trend" => "struggling",
              "evidence" => ["Recent shared losses average 1.0 KDA"]
            },
            %{
              "player_id" => "player-b",
              "player_name" => "Kupo",
-             "verdict" => "He is carrying hard relative to the rest of the group.",
+             "good" => "He is carrying hard relative to the rest of the group.",
+             "bad" => "The support impact still has to survive messy mid-game fights.",
+             "receipt" => "Support loss: 2/3/18.",
              "trend" => "carrying",
              "evidence" => ["Recent losses still include high assist support games"]
            }
          ],
-         "carry_highlights" => [
-           %{
-             "title" => "Kupo keeps fights playable",
-             "details" => "His recent stat lines show strong assist totals even in losses.",
-             "evidence" => ["Support loss: 2/3/18"],
-             "severity" => "medium"
-           }
-         ],
-         "recommendations" => ["Put Koozie on lower-death mids until his recent form recovers."],
+         "run_it_back" => ["Put Koozie on lower-death mids until his recent form recovers."],
          "caveats" => ["Shared loss sample is limited."]
        }}
     else

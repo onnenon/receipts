@@ -512,13 +512,14 @@ defmodule ReceiptsWeb.CompPromptLabLive do
           </div>
         </section>
 
-        <section
+        <.comp_suggestion_report
           :if={@result}
           id="comp-prompt-lab-result"
-          class="rounded-xl border border-secondary/30 bg-secondary/10 p-4"
+          title="Test Result"
+          suggestion={@result}
+          generated_at={@generated_at}
         >
-          <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p class="text-xs font-semibold uppercase tracking-wide text-secondary">Test Result</p>
+          <:actions>
             <div :if={@run_id} id={"quality-rating-#{@run_id}"} class="flex items-center gap-2">
               <span class="text-xs font-semibold text-base-content/50">Rate output:</span>
               <%= for n <- 1..5 do %>
@@ -543,9 +544,8 @@ defmodule ReceiptsWeb.CompPromptLabLive do
                 saved
               </span>
             </div>
-          </div>
-          <.comp_suggestion_result suggestion={@result} generated_at={@generated_at} />
-        </section>
+          </:actions>
+        </.comp_suggestion_report>
 
         <section
           :if={@history != []}

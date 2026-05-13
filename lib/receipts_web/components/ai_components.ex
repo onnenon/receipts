@@ -3,6 +3,31 @@ defmodule ReceiptsWeb.AIComponents do
 
   attr(:suggestion, :map, required: true)
   attr(:generated_at, :any, default: nil)
+  attr(:id, :string, required: true)
+  attr(:title, :string, default: "Comp Result")
+  attr(:subtitle, :string, default: nil)
+  slot(:actions)
+
+  def comp_suggestion_report(assigns) do
+    ~H"""
+    <section id={@id} class="rounded-xl border border-secondary/30 bg-secondary/10 p-4">
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="text-sm font-extrabold uppercase tracking-wide text-secondary">{@title}</p>
+          <p :if={@subtitle} class="mt-0.5 text-xs leading-5 text-base-content/55">
+            {@subtitle}
+          </p>
+        </div>
+        {render_slot(@actions)}
+      </div>
+
+      <.comp_suggestion_result suggestion={@suggestion} generated_at={@generated_at} />
+    </section>
+    """
+  end
+
+  attr(:suggestion, :map, required: true)
+  attr(:generated_at, :any, default: nil)
 
   def comp_suggestion_result(assigns) do
     ~H"""
@@ -122,64 +147,112 @@ defmodule ReceiptsWeb.AIComponents do
 
   attr(:analysis, :map, required: true)
   attr(:generated_at, :any, default: nil)
+  attr(:id, :string, required: true)
+  attr(:title, :string, default: "Analysis Result")
+  attr(:subtitle, :string, default: nil)
+  slot(:actions)
+
+  def win_loss_analysis_report(assigns) do
+    ~H"""
+    <section id={@id} class="rounded-xl border border-secondary/30 bg-secondary/10 p-4">
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="text-sm font-extrabold uppercase tracking-wide text-secondary">{@title}</p>
+          <p :if={@subtitle} class="mt-0.5 text-xs leading-5 text-base-content/55">
+            {@subtitle}
+          </p>
+        </div>
+        {render_slot(@actions)}
+      </div>
+
+      <.win_loss_analysis_result analysis={@analysis} generated_at={@generated_at} />
+    </section>
+    """
+  end
+
+  attr(:analysis, :map, required: true)
+  attr(:generated_at, :any, default: nil)
 
   def win_loss_analysis_result(assigns) do
     ~H"""
-    <div class="space-y-4">
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p class="max-w-3xl text-sm leading-6 text-base-content/70">
-            {@analysis["summary"]}
-          </p>
-          <p :if={@generated_at} class="mt-1 text-xs text-base-content/40">
-            Generated {format_datetime(@generated_at)}
-          </p>
+    <div class="space-y-5">
+      <div class="rounded-xl border border-base-300 bg-base-100/55 p-4 shadow-sm">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-primary">Verdict</p>
+            <p class="mt-2 max-w-4xl text-sm leading-6 text-base-content/75">
+              {@analysis["summary"]}
+            </p>
+            <p :if={@generated_at} class="mt-2 text-xs text-base-content/40">
+              Generated {format_datetime(@generated_at)}
+            </p>
+          </div>
+          <span class={[
+            "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
+            confidence_badge_class(@analysis["confidence"])
+          ]}>
+            Evidence: {@analysis["confidence"]}
+          </span>
         </div>
-        <span class={[
-          "inline-flex shrink-0 items-center rounded-lg border px-2.5 py-1 text-xs font-bold capitalize",
-          confidence_badge_class(@analysis["confidence"])
-        ]}>
-          {@analysis["confidence"]} confidence
-        </span>
       </div>
 
-      <%= if @analysis["loss_causes"] != [] do %>
-        <div class="grid gap-3 md:grid-cols-2">
-          <%= for cause <- @analysis["loss_causes"] do %>
-            <article class="rounded-xl border border-base-300 bg-base-100/60 p-4">
-              <div class="flex items-start justify-between gap-3">
-                <h3 class="text-sm font-bold">{cause["title"]}</h3>
-                <span class={[
-                  "rounded-md border px-2 py-0.5 text-xs font-bold capitalize",
-                  severity_badge_class(cause["severity"])
-                ]}>
-                  {cause["severity"]}
-                </span>
-              </div>
-              <p class="mt-2 text-sm leading-6 text-base-content/65">{cause["details"]}</p>
-              <ul class="mt-3 space-y-1.5">
-                <%= for evidence <- cause["evidence"] do %>
-                  <li class="flex gap-2 text-xs leading-5 text-base-content/55">
-                    <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35"></span>
-                    <span>{evidence}</span>
-                  </li>
-                <% end %>
-              </ul>
-            </article>
-          <% end %>
+      <div class="grid gap-3 lg:grid-cols-2">
+        <.analysis_insight_column
+          id="win-loss-went-well"
+          title="What Went Well"
+          tone="good"
+          insights={@analysis["went_well"]}
+        />
+        <.analysis_insight_column
+          id="win-loss-went-poorly"
+          title="What Went Poorly"
+          tone="bad"
+          insights={@analysis["went_poorly"]}
+        />
+      </div>
+
+      <%= if @analysis["receipts"] != [] do %>
+        <div id="win-loss-receipts" class="space-y-3">
+          <div class="rounded-lg border border-primary/25 bg-primary/10 px-3 py-2">
+            <p class="text-sm font-extrabold uppercase tracking-wide text-primary">Receipts</p>
+            <p class="mt-0.5 text-xs leading-5 text-base-content/55">
+              Specific games and stat lines behind the read.
+            </p>
+          </div>
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <%= for receipt <- @analysis["receipts"] do %>
+              <article class="rounded-xl border border-primary/20 bg-base-100/60 p-4 shadow-sm">
+                <div class="flex items-start justify-between gap-3">
+                  <p class="text-sm font-bold">{receipt["label"]}</p>
+                  <span class="rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                    {receipt["result"]}
+                  </span>
+                </div>
+                <p class="mt-2 text-xs font-semibold uppercase tracking-wide text-base-content/45">
+                  {[receipt["player_name"], receipt["champion"], receipt["statline"]]
+                  |> Enum.reject(&(&1 == ""))
+                  |> Enum.join(" · ")}
+                </p>
+                <p class="mt-2 text-sm leading-6 text-base-content/65">{receipt["takeaway"]}</p>
+              </article>
+            <% end %>
+          </div>
         </div>
       <% end %>
 
       <%= if @analysis["player_readouts"] != [] do %>
-        <div class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-            Player Readouts
-          </p>
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div class="space-y-3">
+          <div class="rounded-lg border border-info/25 bg-info/10 px-3 py-2">
+            <p class="text-sm font-extrabold uppercase tracking-wide text-info">Player Readouts</p>
+            <p class="mt-0.5 text-xs leading-5 text-base-content/55">
+              Individual good, bad, and best receipt.
+            </p>
+          </div>
+          <div class="grid gap-3 md:grid-cols-2">
             <%= for readout <- @analysis["player_readouts"] do %>
               <article
                 id={"win-loss-player-#{readout["player_id"]}"}
-                class="rounded-xl border border-base-300 bg-base-100/60 p-4"
+                class="rounded-xl border border-base-300 bg-base-100/60 p-4 shadow-sm"
               >
                 <div class="flex items-start justify-between gap-3">
                   <h3 class="text-lg font-bold tracking-tight">{readout["player_name"]}</h3>
@@ -190,8 +263,26 @@ defmodule ReceiptsWeb.AIComponents do
                     {readout["trend"]}
                   </span>
                 </div>
-                <p class="mt-2 text-sm leading-6 text-base-content/70">{readout["verdict"]}</p>
-                <ul class="mt-3 space-y-1.5">
+
+                <div class="mt-3 space-y-3 text-sm leading-6">
+                  <p :if={readout["good"] != ""} class="text-base-content/70">
+                    <span class="font-bold text-primary">Went well:</span> {readout["good"]}
+                  </p>
+                  <p :if={readout["bad"] != ""} class="text-base-content/70">
+                    <span class="font-bold text-base-content/80">Went poorly:</span> {readout["bad"]}
+                  </p>
+                  <p :if={readout["receipt"] != ""} class="text-base-content/60">
+                    <span class="font-bold text-base-content/70">Receipt:</span> {readout["receipt"]}
+                  </p>
+                  <p
+                    :if={readout["good"] == "" && readout["bad"] == "" && readout["verdict"] != ""}
+                    class="text-base-content/70"
+                  >
+                    {readout["verdict"]}
+                  </p>
+                </div>
+
+                <ul :if={readout["evidence"] != []} class="mt-3 space-y-1.5">
                   <%= for evidence <- readout["evidence"] do %>
                     <li class="flex gap-2 text-xs leading-5 text-base-content/55">
                       <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35"></span>
@@ -205,49 +296,88 @@ defmodule ReceiptsWeb.AIComponents do
         </div>
       <% end %>
 
-      <%= if @analysis["carry_highlights"] != [] do %>
-        <div class="rounded-xl border border-success/30 bg-success/10 p-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-success">Carry Highlights</p>
-          <div class="mt-2 grid gap-2 md:grid-cols-2">
-            <%= for highlight <- @analysis["carry_highlights"] do %>
-              <div>
-                <p class="text-sm font-bold">{highlight["title"]}</p>
-                <p class="mt-1 text-xs leading-5 text-base-content/60">{highlight["details"]}</p>
-              </div>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-
-      <%= if @analysis["recommendations"] != [] do %>
-        <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-            Adjustments
-          </p>
+      <%= if @analysis["run_it_back"] != [] do %>
+        <div class="rounded-xl border border-warning/25 bg-warning/10 p-3 shadow-sm">
+          <p class="text-sm font-extrabold uppercase tracking-wide text-warning">Run It Back</p>
           <ul class="mt-2 space-y-1">
-            <%= for recommendation <- @analysis["recommendations"] do %>
-              <li class="text-xs leading-5 text-base-content/55">{recommendation}</li>
+            <%= for recommendation <- @analysis["run_it_back"] do %>
+              <li class="text-xs leading-5 text-base-content/60">{recommendation}</li>
             <% end %>
           </ul>
         </div>
       <% end %>
 
       <%= if @analysis["caveats"] != [] do %>
-        <div class="rounded-xl border border-base-300 bg-base-100/60 p-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">Caveats</p>
+        <details class="rounded-xl border border-base-300 bg-base-100/60 p-3 shadow-sm">
+          <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-base-content/50">
+            Caveats
+          </summary>
           <ul class="mt-2 space-y-1">
             <%= for caveat <- @analysis["caveats"] do %>
               <li class="text-xs leading-5 text-base-content/55">{caveat}</li>
             <% end %>
           </ul>
-        </div>
+        </details>
       <% end %>
     </div>
     """
   end
 
+  attr(:id, :string, required: true)
+  attr(:title, :string, required: true)
+  attr(:tone, :string, required: true)
+  attr(:insights, :list, required: true)
+
+  defp analysis_insight_column(assigns) do
+    ~H"""
+    <section :if={@insights != []} id={@id} class="space-y-3">
+      <div class={[
+        "rounded-lg border px-3 py-2",
+        analysis_heading_class(@tone)
+      ]}>
+        <p class={[
+          "text-sm font-extrabold uppercase tracking-wide",
+          analysis_heading_text_class(@tone)
+        ]}>
+          {@title}
+        </p>
+        <p class="mt-0.5 text-xs leading-5 text-base-content/55">
+          {analysis_heading_subtitle(@tone)}
+        </p>
+      </div>
+      <div class="space-y-3">
+        <%= for insight <- @insights do %>
+          <article class={[
+            "rounded-xl border bg-base-100/60 p-4 shadow-sm",
+            analysis_card_class(@tone)
+          ]}>
+            <div class="flex items-start justify-between gap-3">
+              <h3 class="text-sm font-bold">{insight["title"]}</h3>
+              <span class={[
+                "rounded-md border px-2 py-0.5 text-xs font-bold",
+                evidence_badge_class(insight["evidence_strength"])
+              ]}>
+                {evidence_strength_label(insight["evidence_strength"])}
+              </span>
+            </div>
+            <p class="mt-2 text-sm leading-6 text-base-content/65">{insight["details"]}</p>
+            <ul :if={insight["evidence"] != []} class="mt-3 space-y-1.5">
+              <%= for evidence <- insight["evidence"] do %>
+                <li class="flex gap-2 text-xs leading-5 text-base-content/55">
+                  <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-base-content/35"></span>
+                  <span>{evidence}</span>
+                </li>
+              <% end %>
+            </ul>
+          </article>
+        <% end %>
+      </div>
+    </section>
+    """
+  end
+
   defp confidence_badge_class("high"), do: "border-success/30 bg-success/15 text-success"
-  defp confidence_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
+  defp confidence_badge_class("medium"), do: "border-primary/25 bg-primary/10 text-primary"
   defp confidence_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
 
   defp position_badge_class("TOP"), do: "bg-amber-500/20 text-amber-400 ring-amber-500/20"
@@ -267,9 +397,27 @@ defmodule ReceiptsWeb.AIComponents do
   defp position_card_class("UTILITY"), do: "border-violet-500/30 bg-violet-500/10"
   defp position_card_class(_), do: "border-base-300 bg-base-300/50"
 
-  defp severity_badge_class("high"), do: "border-error/30 bg-error/15 text-error"
-  defp severity_badge_class("medium"), do: "border-warning/30 bg-warning/15 text-warning"
-  defp severity_badge_class(_), do: "border-base-300 bg-base-300/50 text-base-content/60"
+  defp analysis_card_class("good"), do: "border-primary/20"
+  defp analysis_card_class(_), do: "border-error/20"
+
+  defp analysis_heading_class("good"), do: "border-success/25 bg-success/10"
+  defp analysis_heading_class(_), do: "border-error/25 bg-error/10"
+
+  defp analysis_heading_text_class("good"), do: "text-success"
+  defp analysis_heading_text_class(_), do: "text-error"
+
+  defp analysis_heading_subtitle("good"), do: "Strengths, carry signs, and games that held up."
+
+  defp analysis_heading_subtitle(_),
+    do: "Recurring issues and games where the pattern broke down."
+
+  defp evidence_badge_class("high"), do: "border-primary/25 bg-primary/10 text-primary"
+  defp evidence_badge_class("medium"), do: "border-base-300 bg-base-300/50 text-base-content/65"
+  defp evidence_badge_class(_), do: "border-base-300 bg-base-100/70 text-base-content/45"
+
+  defp evidence_strength_label("high"), do: "Strong evidence"
+  defp evidence_strength_label("medium"), do: "Some evidence"
+  defp evidence_strength_label(_), do: "Thin evidence"
 
   defp trend_badge_class("carrying"), do: "border-success/30 bg-success/15 text-success"
   defp trend_badge_class("struggling"), do: "border-error/30 bg-error/15 text-error"
