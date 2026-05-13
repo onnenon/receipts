@@ -1731,10 +1731,10 @@ defmodule ReceiptsWeb.PlayerLive do
             id="run-it-down-analysis-panel"
             class="relative z-20 overflow-visible rounded-xl border border-base-300 bg-base-200 shadow-sm"
           >
-            <div class="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+            <div class="flex flex-col gap-3 px-4 py-5 lg:flex-row lg:items-start lg:justify-between">
               <div class="min-w-0">
-                <p class="text-sm font-semibold uppercase tracking-wide text-base-content/50">
-                  Will They Run It Down?
+                <p class="text-2xl font-black tracking-tight text-base-content sm:text-3xl">
+                  Will {@player.name} Run It Down?
                 </p>
                 <p class="text-xs leading-5 text-base-content/40">
                   Pick a champion and position, then judge the lock-in from champion history, similar champs, role form, and recent games.
@@ -1835,7 +1835,7 @@ defmodule ReceiptsWeb.PlayerLive do
                   <div class={[
                     "relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
                     if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
-                      do: "min-h-32 px-5 py-5",
+                      do: "min-h-52 px-6 py-6",
                       else: ""
                     )
                   ]}>
@@ -1853,7 +1853,7 @@ defmodule ReceiptsWeb.PlayerLive do
                         <span class={[
                           "font-black tracking-tight",
                           if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
-                            do: "text-3xl text-white drop-shadow",
+                            do: "text-5xl text-white drop-shadow",
                             else: "text-lg"
                           )
                         ]}>
@@ -1905,7 +1905,6 @@ defmodule ReceiptsWeb.PlayerLive do
                         <% MapSet.size(@run_it_down_positions) == 0 -> %>
                           Pick the role they are threatening to play.
                         <% true -> %>
-                          Current read is scoped to this champion, position, and active filters.
                       <% end %>
                     </div>
                   </div>
