@@ -33,14 +33,12 @@ defmodule Receipts.LoL.StoredMatchParticipantBackfill do
   end
 
   defp candidate_matches(account) do
-    puuid_pattern = "%#{account.riot_puuid}%"
-
     Match
     |> join(:left, [match], participant in MatchParticipant,
       on: participant.match_id == match.id and participant.account_id == ^account.id
     )
     |> where([match, participant], is_nil(participant.id))
-    |> where([match], fragment("?::text LIKE ?", match.raw_info, ^puuid_pattern))
+    |> where([match], fragment("? @> ?", match.participant_puuids, ^[account.riot_puuid]))
     |> order_by([match], asc: match.game_datetime)
     |> Repo.all()
   end

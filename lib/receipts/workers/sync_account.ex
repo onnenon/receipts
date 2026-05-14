@@ -418,6 +418,7 @@ defmodule Receipts.Workers.SyncAccount do
         game_duration_seconds: info["gameDuration"],
         queue_id: queue_id,
         queue_type: Receipts.LoL.Queue.from_id(queue_id),
+        participant_puuids: participant_puuids(info),
         raw_info: info
       })
       |> Ash.create!()
@@ -475,6 +476,14 @@ defmodule Receipts.Workers.SyncAccount do
 
   defp remake_participant?(participant) do
     participant["gameEndedInEarlySurrender"] == true
+  end
+
+  defp participant_puuids(info) do
+    info
+    |> Map.get("participants", [])
+    |> Enum.map(& &1["puuid"])
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
   end
 
   defp resolve_champion(champion_map, champion_riot_id, match_id) do

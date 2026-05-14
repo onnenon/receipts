@@ -10,6 +10,7 @@ defmodule Receipts.LoL.Match do
     custom_indexes do
       index([:game_datetime])
       index([:queue_type])
+      index([:participant_puuids], using: "GIN")
     end
   end
 
@@ -35,6 +36,12 @@ defmodule Receipts.LoL.Match do
     end
 
     attribute :queue_type, :string do
+      public?(true)
+    end
+
+    attribute :participant_puuids, {:array, :string} do
+      allow_nil?(false)
+      default([])
       public?(true)
     end
 
@@ -64,6 +71,7 @@ defmodule Receipts.LoL.Match do
         :game_duration_seconds,
         :queue_id,
         :queue_type,
+        :participant_puuids,
         :raw_info
       ],
       update: []
@@ -76,12 +84,13 @@ defmodule Receipts.LoL.Match do
         :game_duration_seconds,
         :queue_id,
         :queue_type,
+        :participant_puuids,
         :raw_info
       ])
 
       upsert?(true)
       upsert_identity(:unique_match_id)
-      upsert_fields([:queue_id, :queue_type, :raw_info])
+      upsert_fields([:queue_id, :queue_type, :participant_puuids, :raw_info])
     end
   end
 end

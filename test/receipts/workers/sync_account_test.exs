@@ -282,6 +282,11 @@ defmodule Receipts.Workers.SyncAccountTest do
       })
       |> Ash.create!()
 
+    participants = [
+      participant_payload(account, champion, true),
+      participant_payload(other_account, champion, false)
+    ]
+
     match =
       Match
       |> Ash.Changeset.for_create(:sync, %{
@@ -290,14 +295,12 @@ defmodule Receipts.Workers.SyncAccountTest do
         game_duration_seconds: 1800,
         queue_id: 420,
         queue_type: "ranked_solo",
+        participant_puuids: Enum.map(participants, & &1["puuid"]),
         raw_info: %{
           "gameStartTimestamp" => DateTime.to_unix(~U[2024-06-08 02:34:30Z], :millisecond),
           "gameDuration" => 1800,
           "queueId" => 420,
-          "participants" => [
-            participant_payload(account, champion, true),
-            participant_payload(other_account, champion, false)
-          ]
+          "participants" => participants
         }
       })
       |> Ash.create!()
