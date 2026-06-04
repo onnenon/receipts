@@ -1889,7 +1889,7 @@ defmodule ReceiptsWeb.PlayerLive do
                           aria-label="Clear selected champion"
                           class={[
                             "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
-                            if(@selected_champion && MapSet.size(@run_it_down_positions) > 0,
+                            if(MapSet.size(@run_it_down_positions) > 0,
                               do:
                                 "border-white/20 bg-black/35 text-white hover:border-white/40 hover:bg-black/55",
                               else:
@@ -2920,29 +2920,12 @@ defmodule ReceiptsWeb.PlayerLive do
               </div>
             </div>
 
-            <div class={[
-              "grid gap-4",
-              if(@comparison?, do: "lg:grid-cols-2 xl:grid-cols-3", else: "grid-cols-1")
-            ]}>
+            <div class="grid grid-cols-1 gap-4">
               <%= for %{player: result_player, result: result} <- @results do %>
                 <div
                   id={"receipts-result-#{result_player.id}"}
-                  class={[
-                    "space-y-4",
-                    if(@comparison?, do: "rounded-xl border border-base-300 bg-base-200/60 p-4")
-                  ]}
+                  class="space-y-4"
                 >
-                  <%= if @comparison? do %>
-                    <div class="flex items-center justify-between gap-3">
-                      <h3 class="text-xl font-bold tracking-tight">{result_player.name}</h3>
-                      <%= if result.games_played == 0 do %>
-                        <span class="rounded-lg border border-base-300 px-2 py-1 text-xs text-base-content/45">
-                          No games
-                        </span>
-                      <% end %>
-                    </div>
-                  <% end %>
-
                   <%= if result.games_played > 0 do %>
                     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
                       <div class="rounded-xl border border-base-300 bg-base-200 p-4 text-center shadow-sm">

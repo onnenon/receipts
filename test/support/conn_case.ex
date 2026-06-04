@@ -16,7 +16,6 @@ defmodule ReceiptsWeb.ConnCase do
   """
 
   use ExUnit.CaseTemplate
-  require Phoenix.ConnTest
 
   using do
     quote do

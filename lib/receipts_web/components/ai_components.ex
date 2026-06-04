@@ -591,8 +591,6 @@ defmodule ReceiptsWeb.AIComponents do
   defp carry_score_bar_class(score) when score < 65, do: "bg-warning"
   defp carry_score_bar_class(_score), do: "bg-success"
 
-  defp format_datetime(nil), do: "—"
-
   defp format_datetime(%DateTime{} = dt) do
     Calendar.strftime(dt, "%b %-d, %Y at %-I:%M %p UTC")
   end
