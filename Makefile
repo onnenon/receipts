@@ -40,9 +40,10 @@ deploy:
 	if test -n "$$(git status --porcelain --untracked-files=normal 2>/dev/null)"; then \
 		version="$${version}-dirty"; \
 	fi; \
-	echo "Syncing receipts version: $${version}"; \
-	COPYFILE_DISABLE=1 tar \
-		--exclude='./_build' \
+		echo "Syncing receipts version: $${version}"; \
+		COPYFILE_DISABLE=1 tar \
+			--no-xattrs \
+			--exclude='./_build' \
 		--exclude='./deps' \
 		--exclude='./assets/node_modules' \
 		--exclude='./.elixir_ls' \
