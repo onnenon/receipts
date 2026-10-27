@@ -35,7 +35,9 @@ export RECEIPTS_VERSION
 echo "Deploying receipts version: $RECEIPTS_VERSION"
 echo "Build timestamp: $RECEIPTS_BUILT_AT"
 
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build web migrate
+# Refresh registry images while leaving the locally built app image alone.
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull --policy always --ignore-buildable
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build --pull web migrate
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm migrate
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d web cloudflared loki promtail postgres_exporter prometheus grafana

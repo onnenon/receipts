@@ -64,8 +64,14 @@ sudo -u receipts /opt/receipts/deploy/bin/deploy.sh
 sudo systemctl enable receipts.service
 ```
 
-Deploying builds the release image, starts Postgres, runs migrations, and then
-starts the web and Cloudflare Tunnel containers.
+Each deploy checks the registry for updated service images (including `latest`
+tags and `postgres:16`) and checks for newer app build base images. The app image
+is built locally. A failed service-image pull stops deployment before running
+containers are changed.
+
+Deploying then starts Postgres, runs migrations, and starts the web, Cloudflare
+Tunnel, and monitoring containers. Compose recreates containers whose images
+changed and preserves their data volumes.
 
 The deploy script passes `RECEIPTS_VERSION` into the image and runtime
 environment. With a Git checkout this is the short commit SHA, with `-dirty`
